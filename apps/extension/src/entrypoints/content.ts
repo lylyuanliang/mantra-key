@@ -3,7 +3,7 @@ import { extractDomain, toUnicodeDomain } from '../utils/domain';
 import { computeCanary } from '../utils/crypto';
 
 export default defineContentScript({
-  matches: ['*://*/*'],
+  matches: ['<all_urls>'],
   main() {
     console.log('[MantraKey Ext] Content Script 挂载就绪');
 
@@ -15,6 +15,16 @@ export default defineContentScript({
     let activeBannerEl: HTMLElement | null = null;
     let activeToastEl: HTMLElement | null = null;
     let currentAnchorInput: HTMLInputElement | null = null;
+    let bubbleOpenTimestamp = 0;
+
+    // 监听扩展主题实时切换
+    try {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && changes.mantra_theme && activeBubbleEl) {
+          activeBubbleEl.setAttribute('data-theme', changes.mantra_theme.newValue === 'dark' ? 'dark' : 'light');
+        }
+      });
+    } catch {}
 
     // SVG 图标定义
     const ICONS = {
@@ -202,29 +212,67 @@ export default defineContentScript({
     }
 
     /**
+     * 安全跨进程通信，内建超时与异常兜底，防止挂死
+     */
+    function safeSendMessage<T>(msg: Record<string, unknown>, timeoutMs = 800): Promise<T | null> {
+      return new Promise((resolve) => {
+        let done = false;
+        const timer = setTimeout(() => {
+          if (!done) {
+            done = true;
+            resolve(null);
+          }
+        }, timeoutMs);
+
+        try {
+          chrome.runtime.sendMessage(msg, (response) => {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            if (chrome.runtime.lastError) {
+              resolve(null);
+              return;
+            }
+            resolve(response as T);
+          });
+        } catch {
+          if (!done) {
+            done = true;
+            clearTimeout(timer);
+            resolve(null);
+          }
+        }
+      });
+    }
+
+    /**
      * 弹出 Screen 01 悬浮内嵌气泡卡片 (100% 挂载在 body 上，彻底防裁剪)
      */
     async function renderAutofillBubble(anchorInput: HTMLInputElement) {
       closeBubble();
       currentAnchorInput = anchorInput;
+      bubbleOpenTimestamp = Date.now();
 
       const bubble = document.createElement('div');
       bubble.className = 'mantra-bubble-container';
       bubble.id = 'mantra-autofill-bubble';
 
-      // 查询会话状态与本站点真实已存账号
-      const [sessionRes, accountsRes] = await Promise.all([
-        new Promise<{ data?: { session_state?: string; ttl_remaining?: number; canary?: string } }>((res) => {
-          chrome.runtime.sendMessage({ action: 'QUERY_SESSION' }, res);
-        }),
-        new Promise<{ accounts?: Array<{ username: string; version: number; rulePreset: string; tag?: string }> }>((res) => {
-          chrome.runtime.sendMessage({ action: 'GET_ACCOUNTS_FOR_DOMAIN', payload: { domain: currentDomain } }, res);
-        }),
+      // 查询会话状态、本站点真实已存账号与当前主题 (带超时与兜底保障)
+      const [sessionRes, accountsRes, themeRes] = await Promise.all([
+        safeSendMessage<{ data?: { session_state?: string; ttl_remaining?: number; canary?: string } }>({ action: 'QUERY_SESSION' }, 600),
+        safeSendMessage<{ accounts?: Array<{ username: string; version: number; rulePreset: string; tag?: string; serviceKey?: string }> }>({
+          action: 'GET_ACCOUNTS_FOR_DOMAIN',
+          payload: { domain: currentDomain, title: document.title }
+        }, 600),
+        safeSendMessage<{ theme?: string }>({ action: 'GET_THEME' }, 300),
       ]);
+
+      const currentTheme = themeRes?.theme === 'dark' ? 'dark' : 'light';
+      bubble.setAttribute('data-theme', currentTheme);
 
       const isUnlocked = sessionRes?.data?.session_state === 'unlocked';
       const ttlMinutes = Math.floor((sessionRes?.data?.ttl_remaining || 0) / 60);
-      const canaryText = sessionRes?.data?.canary ? `[${sessionRes.data.canary}]` : '未解锁';
+      const canaryText = sessionRes?.data?.canary ? `[${sessionRes.data.canary}]` : '待计算';
       const accounts = accountsRes?.accounts || [];
 
       let accountsHtml = '';
@@ -232,7 +280,7 @@ export default defineContentScript({
         accountsHtml = `
           <div class="mantra-inline-unlock-box">
             <div class="mantra-inline-unlock-header">
-              <span class="mantra-inline-title">🔑 就地解锁主口令</span>
+              <span class="mantra-inline-title">🔑 输入记忆口令</span>
               <span class="mantra-inline-canary" id="bubble-canary-badge">--------</span>
             </div>
             <div class="mantra-inline-input-wrap">
@@ -242,14 +290,14 @@ export default defineContentScript({
                 class="mantra-bubble-input"
                 data-mantra-internal="true"
                 data-mantra-bound="true"
-                placeholder="输入主口令，回车立即解锁并填充..."
+                placeholder="输入记忆口令，回车自动生成并填入..."
                 autocomplete="off"
                 spellcheck="false"
               />
               <button type="button" class="mantra-bubble-btn-eye" id="bubble-btn-eye" title="切换明文">👁️</button>
             </div>
             <button type="button" class="mantra-bubble-btn-unlock" id="bubble-btn-unlock">
-              ⚡ 立即解锁会话并自动填充
+              ⚡ 立即生成并自动填充
             </button>
           </div>
         `;
@@ -293,8 +341,8 @@ export default defineContentScript({
             <span class="mantra-domain-title">${displayDomain}</span>
           </div>
           <div class="mantra-session-status">
-            <span class="mantra-pulse-dot" style="${isUnlocked ? '' : 'background-color: #ef4444; box-shadow: none;'}"></span>
-            <span>${isUnlocked ? 'Session Active' : 'Locked'}</span>
+            <span class="mantra-pulse-dot" style="${isUnlocked ? '' : 'background-color: #94a3b8; box-shadow: none;'}"></span>
+            <span>${isUnlocked ? '已就绪' : '待输入'}</span>
           </div>
         </div>
 
@@ -304,7 +352,7 @@ export default defineContentScript({
 
         <div class="mantra-bubble-footer">
           <div class="mantra-telemetry-item">
-            <span>TTL: <span class="mantra-telemetry-highlight">${isUnlocked ? `${ttlMinutes}m` : '锁定'}</span></span>
+            <span>TTL: <span class="mantra-telemetry-highlight">${isUnlocked ? `${ttlMinutes}m` : '待就绪'}</span></span>
           </div>
           <div>•</div>
           <div class="mantra-telemetry-item">
@@ -363,7 +411,7 @@ export default defineContentScript({
           e.stopPropagation();
           const val = bubbleInput.value.trim();
           if (!val) {
-            showInPageToast('请输入主口令');
+            showInPageToast('请输入记忆口令');
             bubbleInput.focus();
             return;
           }
@@ -373,7 +421,7 @@ export default defineContentScript({
             payload: { mantra: val },
           }, async (res) => {
             if (res?.status === 'ok') {
-              showInPageToast(`⚡ 会话已就地解锁！金丝雀: [${res.session?.canary || ''}]`);
+              showInPageToast(`⚡ 记忆口令已就绪！金丝雀: [${res.session?.canary || ''}]`);
               if (accounts.length > 0) {
                 const firstAcc = accounts[0];
                 chrome.runtime.sendMessage({
@@ -398,7 +446,7 @@ export default defineContentScript({
                 renderAutofillBubble(anchorInput);
               }
             } else {
-              showInPageToast('❌ 解锁失败: ' + (res?.message || '未知错误'));
+              showInPageToast('❌ 生成失败: ' + (res?.message || '未知错误'));
             }
           });
         });
@@ -532,6 +580,7 @@ export default defineContentScript({
       badge.className = 'mantra-in-input-badge';
       badge.type = 'button';
       badge.title = '密诀 MantraKey - 一键安全派生与自动填充';
+      badge.setAttribute('data-mantra-badge', 'true');
       badge.innerHTML = ICONS.key;
 
       // 强制垂直绝对居中，避免错位
@@ -540,23 +589,33 @@ export default defineContentScript({
       badge.style.transform = 'translateY(-50%)';
       badge.style.right = `${rightOffset}px`;
       badge.style.zIndex = '2147483645';
+      badge.style.pointerEvents = 'auto';
 
-      // 阻止 mousedown 抢夺输入框焦点
+      // 允许 mousedown 冒泡但不抢夺输入框焦点
       badge.addEventListener('mousedown', (e) => {
-        e.preventDefault();
         e.stopPropagation();
       });
 
-      // 仅在完整的 click 事件中触发气泡展开/折叠，彻底防止按下出现、松开关闭的双触发问题
-      badge.addEventListener('click', (e) => {
+      let lastBadgeToggleTime = 0;
+      const handleBadgeTrigger = (e: Event) => {
         e.preventDefault();
         e.stopPropagation();
+        const now = Date.now();
+        if (now - lastBadgeToggleTime < 250) {
+          return;
+        }
+        lastBadgeToggleTime = now;
+
         if (activeBubbleEl) {
           closeBubble();
         } else {
           renderAutofillBubble(input);
         }
-      });
+      };
+
+      // 在捕获阶段 (capture: true) 拦截，彻底抵御 Vue/React/Naive UI 等现代 SPA 框架的事件拦截
+      badge.addEventListener('click', handleBadgeTrigger, true);
+      badge.addEventListener('pointerup', handleBadgeTrigger, true);
 
       parent.appendChild(badge);
     }
@@ -652,17 +711,21 @@ export default defineContentScript({
       }
     });
 
-    // 全局点击监听：点击外部关闭输入框小气泡
+    // 全局点击监听：点击外部关闭输入框小气泡 (附带 250ms 打开防抖冷却，防止同一点击冒泡秒关)
     document.addEventListener('click', (e) => {
+      if (Date.now() - bubbleOpenTimestamp < 250) {
+        return;
+      }
       const target = e.target as HTMLElement;
       if (
         activeBubbleEl &&
         !activeBubbleEl.contains(target) &&
-        !target.closest('.mantra-in-input-badge')
+        !target.closest?.('.mantra-in-input-badge') &&
+        !target.closest?.('[data-mantra-badge="true"]')
       ) {
         closeBubble();
       }
-    });
+    }, true);
 
     // 页面滚动与尺寸变化时自适应气泡定位
     window.addEventListener('scroll', () => updateBubblePosition(), { passive: true });

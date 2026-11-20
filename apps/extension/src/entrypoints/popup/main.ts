@@ -16,6 +16,8 @@ import {
   saveAccountForDomain,
   deleteAccountFromDomain,
   updateAccountVersion,
+  getAllAccountsManifest,
+  linkDomainToExisting,
 } from '../../utils/storage';
 import {
   getWebDAVConfig,
@@ -23,6 +25,8 @@ import {
   getSyncStatus,
   testWebDAVConnection,
   performWebDAVSync,
+  exportLocalManifest,
+  importMergedManifest,
   type WebDAVConfig,
 } from '../../utils/webdav';
 
@@ -72,6 +76,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const newPwdPreview = document.getElementById('new-pwd-preview') as HTMLElement;
   const btnPeekPreview = document.getElementById('btn-peek-preview') as HTMLButtonElement;
 
+  // 通用服务归属与常变域名别名组件
+  const newAccService = document.getElementById('new-acc-service') as HTMLInputElement | null;
+  const newAccAliases = document.getElementById('new-acc-aliases') as HTMLInputElement | null;
+  const serviceAliasesWrap = document.getElementById('service-aliases-wrap') as HTMLElement | null;
+  const btnToggleServiceDetail = document.getElementById('btn-toggle-service-detail') as HTMLElement | null;
+
   // 版本 Popover 气泡组件
   const versionInfoBtn = document.getElementById('version-info-btn') as HTMLButtonElement | null;
   const versionPopoverCard = document.getElementById('version-popover-card') as HTMLElement | null;
@@ -84,8 +94,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   const linkClearAllDomain = document.getElementById('link-clear-all-domain') as HTMLElement;
   const copyToast = document.getElementById('copy-toast') as HTMLElement;
 
+  // 模态弹窗与本地备份组件
+  const btnModalBackTop = document.getElementById('btn-modal-back-top') as HTMLButtonElement | null;
+  const btnModalBackBottom = document.getElementById('btn-modal-back-bottom') as HTMLButtonElement | null;
+  const tabBtnLocal = document.getElementById('tab-btn-local') as HTMLButtonElement | null;
+  const tabBtnWebdav = document.getElementById('tab-btn-webdav') as HTMLButtonElement | null;
+  const paneLocalBackup = document.getElementById('pane-local-backup') as HTMLElement | null;
+  const paneWebdavSync = document.getElementById('pane-webdav-sync') as HTMLElement | null;
+  const btnDoExportFile = document.getElementById('btn-do-export-file') as HTMLButtonElement | null;
+  const btnTriggerImportFile = document.getElementById('btn-trigger-import-file') as HTMLButtonElement | null;
+  const inputImportBackupFile = document.getElementById('input-import-backup-file') as HTMLInputElement | null;
+
   // 内部状态
   let currentDomain = 'github.com';
+  let activeTabTitle = '';
   let activeMantra: string | null = null;
   let activeCanary: string | null = null;
   let ttlRemaining = 0;
@@ -96,15 +118,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   let ttlTimer: number | null = null;
 
   /**
-   * 弹出 Toast 提示
+   * 弹出 Toast 提示 (顶层高 z-index 浮层，支持多次调用防抖)
    */
-  function showToast(text: string) {
+  let toastTimer: number | null = null;
+  function showToast(text: string, duration: number = 2400) {
     if (copyToast) {
+      if (toastTimer) {
+        clearTimeout(toastTimer);
+      }
       copyToast.textContent = text;
       copyToast.style.display = 'block';
-      setTimeout(() => {
+      toastTimer = window.setTimeout(() => {
         copyToast.style.display = 'none';
-      }, 2500);
+        toastTimer = null;
+      }, duration);
     }
   }
 
@@ -203,7 +230,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   /**
-   * 刷新界面主口令会话视图状态
+   * 刷新界面会话视图状态
    */
   function updateSessionView() {
     if (isUnlocked && activeMantra) {
@@ -213,11 +240,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       sessionDot.classList.remove('locked');
       if (sessionStatusPill) {
         sessionStatusPill.classList.remove('locked');
-        sessionStatusPill.title = '主口令会话激活中（15分钟物理自毁）';
+        sessionStatusPill.title = '记忆口令已就绪（15分钟物理清空）';
       }
       btnLockSession.style.display = 'inline-flex';
-      btnLockSession.textContent = '锁定';
-      btnLockSession.title = '立即锁定并擦除会话';
+      btnLockSession.textContent = '清空';
+      btnLockSession.title = '立即清空口令缓存并擦除内存';
 
       headerCanaryChip.style.display = 'inline-flex';
       headerCanaryText.textContent = activeCanary || '--------';
@@ -238,9 +265,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       sessionDot.classList.add('locked');
       if (sessionStatusPill) {
         sessionStatusPill.classList.add('locked');
-        sessionStatusPill.title = '会话已锁定，内存中无口令驻留';
+        sessionStatusPill.title = '口令未就绪，内存零驻留';
       }
-      sessionTtlText.textContent = '已锁定';
+      sessionTtlText.textContent = '待输入';
       btnLockSession.style.display = 'none';
       if (ttlTimer) {
         clearInterval(ttlTimer);
@@ -251,7 +278,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   /**
-   * 执行锁定
+   * 执行清空已存口令
    */
   async function handleLockSession() {
     await lockSession();
@@ -262,7 +289,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     inputMasterMantra.value = '';
     canaryPreviewHex.textContent = '--------';
     updateSessionView();
-    showToast('会话已锁定，内存已物理清零');
+    showToast('口令已清空，内存已物理清零');
   }
 
   /**
@@ -278,9 +305,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const username = newAccUser.value.trim() || 'default';
     const version = parseInt(newAccVer.value, 10) || 1;
     const rule = (newAccRule.value as RulePreset) || 'standard-16';
+    const serviceKey = newAccService?.value.trim() || '';
+    const derivationBase = serviceKey || currentDomain;
 
     try {
-      const derived = await deriveSitePassword(activeMantra, currentDomain, username, version, rule);
+      const derived = await deriveSitePassword(activeMantra, derivationBase, username, version, rule);
       currentDerivedPreview = derived;
       if (isPreviewPeek) {
         newPwdPreview.textContent = derived;
@@ -297,18 +326,40 @@ document.addEventListener('DOMContentLoaded', async () => {
    * 即使未解锁状态下，也完整展示凭据元数据清单
    */
   async function loadDomainAccounts() {
-    const accounts = await getAccountsForDomain(currentDomain);
+    const accounts = await getAccountsForDomain(currentDomain, activeTabTitle);
     accCountBadge.textContent = accounts.length.toString();
 
+    // 账号区域常驻展示，杜绝无清单界面的情况
+    accountsSection.style.display = 'flex';
+    deriveCardTitle.textContent = '⚡ 录入新账号';
+
     if (accounts.length === 0) {
-      accountsSection.style.display = 'none';
-      deriveCardTitle.textContent = '⚡ 快速派生与填充';
+      accountListEl.innerHTML = `
+        <div class="empty-accounts-card" style="padding: 10px 12px; background: var(--color-surface-subtle); border: 1px dashed var(--color-border); border-radius: 8px; text-align: center; margin-bottom: 4px;">
+          <div style="font-size: 11px; color: var(--color-text-muted); margin-bottom: 6px;">
+            当前站点尚未记录专属账号
+          </div>
+          <div style="display: flex; gap: 8px; justify-content: center;">
+            <button type="button" class="btn-xs-primary" id="btn-empty-quick-add" style="padding: 4px 10px; font-size: 11px; cursor: pointer;">
+              + 立即录入
+            </button>
+            <button type="button" class="btn-xs-muted" id="btn-empty-open-manifest" style="padding: 4px 10px; font-size: 11px; cursor: pointer;">
+              📋 浏览所有记录
+            </button>
+          </div>
+        </div>
+      `;
+
+      accountListEl.querySelector('#btn-empty-quick-add')?.addEventListener('click', () => {
+        addAccountCard.scrollIntoView({ behavior: 'smooth' });
+        newAccUser.focus();
+      });
+      accountListEl.querySelector('#btn-empty-open-manifest')?.addEventListener('click', () => {
+        openManifestModal();
+      });
       return;
     }
 
-    // 存在账号时常驻展示清单
-    accountsSection.style.display = 'flex';
-    deriveCardTitle.textContent = '⚡ 录入新账号';
     accountListEl.innerHTML = '';
 
     for (let i = 0; i < accounts.length; i++) {
@@ -318,20 +369,26 @@ document.addEventListener('DOMContentLoaded', async () => {
       itemEl.dataset.username = acc.username;
 
       let accountPwd = '';
+      const derivationBase = acc.serviceKey || currentDomain;
       if (activeMantra) {
         accountPwd = await deriveSitePassword(
           activeMantra,
-          currentDomain,
+          derivationBase,
           acc.username,
           acc.version,
           acc.rulePreset
         );
       }
 
+      const aliasBadgeHtml = acc.serviceKey ? `<span class="alias-tag-badge" title="跨域名派生对齐">🏷️ ${acc.serviceKey}</span>` : '';
+
       itemEl.innerHTML = `
         <div class="account-item-top">
           <span class="account-username" title="${acc.username}">${acc.username}</span>
-          <span class="account-tag ${acc.tag === 'Work' ? 'work' : ''}">${acc.tag || 'v' + acc.version}</span>
+          <div style="display: flex; align-items: center;">
+            <span class="account-tag ${acc.tag === 'Work' ? 'work' : ''}">${acc.tag || 'v' + acc.version}</span>
+            ${aliasBadgeHtml}
+          </div>
         </div>
         <div class="account-item-bottom">
           <div class="account-meta">
@@ -354,7 +411,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         e.stopPropagation();
         if (!activeMantra) {
           inputMasterMantra.focus();
-          showToast('请先输入主口令解锁会话以实时派生强密码');
+          showToast('请先输入记忆口令以实时生成强密码');
           return;
         }
         chrome.runtime.sendMessage({
@@ -372,7 +429,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         e.stopPropagation();
         if (!activeMantra) {
           inputMasterMantra.focus();
-          showToast('请先输入主口令解锁会话以实时派生强密码');
+          showToast('请先输入记忆口令以实时生成强密码');
           return;
         }
         copyToClipboard(accountPwd, acc.username);
@@ -412,11 +469,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 1. 获取当前活动标签页真实域名并转换为友好 Unicode
   try {
-    const domainRes = await new Promise<{ domain?: string }>((resolve) => {
+    const domainRes = await new Promise<{ domain?: string; title?: string }>((resolve) => {
       chrome.runtime.sendMessage({ action: 'GET_CURRENT_DOMAIN' }, resolve);
     });
     if (domainRes?.domain) {
       currentDomain = domainRes.domain;
+    }
+    if (domainRes?.title) {
+      activeTabTitle = domainRes.title;
     }
   } catch (e) {
     console.warn('[Popup] 获取活动域名失败:', e);
@@ -463,7 +523,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   btnUnlockSubmit.addEventListener('click', async () => {
     const val = inputMasterMantra.value.trim();
     if (!val) {
-      showToast('请输入有效的主口令');
+      showToast('请输入有效的记忆口令');
       inputMasterMantra.focus();
       return;
     }
@@ -474,7 +534,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     activeCanary = state.canary;
     ttlRemaining = state.ttlRemaining;
     updateSessionView();
-    showToast(`会话已解锁！金丝雀: [${state.canary}]`);
+    showToast(`记忆口令已就绪！金丝雀: [${state.canary}]`);
   });
 
   // 6. 快捷示例填充 (若存在)
@@ -574,12 +634,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const version = parseInt(newAccVer.value, 10) || 1;
     const rulePreset = (newAccRule.value as RulePreset) || 'standard-16';
+    const serviceKey = newAccService?.value.trim() || undefined;
+    const aliasesRaw = newAccAliases?.value.trim() || '';
+    const aliases = aliasesRaw ? aliasesRaw.split(/[,，]/).map((s) => s.trim()).filter(Boolean) : undefined;
 
     await saveAccountForDomain(currentDomain, {
       username: user,
       version,
       rulePreset,
-      tag: 'Personal',
+      serviceKey,
+      aliases,
+      tag: serviceKey ? `服务: ${serviceKey}` : 'Personal',
     });
 
     if (!currentDerivedPreview) {
@@ -616,7 +681,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // 15. WebDAV 端到端多端同步交互逻辑
+  // 15. 通用服务归属与常变域名别名切换交互
+  btnToggleServiceDetail?.addEventListener('click', () => {
+    if (serviceAliasesWrap) {
+      const isHidden = serviceAliasesWrap.style.display === 'none';
+      serviceAliasesWrap.style.display = isHidden ? 'flex' : 'none';
+    }
+  });
+  newAccService?.addEventListener('input', () => updateNewPwdPreview());
+
+  // 16. 数据管理与多端同步全屏模态弹窗交互
   const btnOpenSyncModal = document.getElementById('btn-open-sync-modal');
   const syncModalOverlay = document.getElementById('sync-modal-overlay');
   const btnCloseSyncModal = document.getElementById('btn-close-sync-modal');
@@ -633,6 +707,112 @@ document.addEventListener('DOMContentLoaded', async () => {
   const popupSyncStatusBadge = document.getElementById('popup-sync-status-badge');
   const popupSyncTimeText = document.getElementById('popup-sync-time-text');
 
+  function closeSyncModal() {
+    if (syncModalOverlay) {
+      syncModalOverlay.style.display = 'none';
+    }
+  }
+
+  function openSyncModal() {
+    if (syncModalOverlay) {
+      syncModalOverlay.style.display = 'flex';
+      refreshSyncView();
+    }
+  }
+
+  btnOpenSyncModal?.addEventListener('click', openSyncModal);
+  btnCloseSyncModal?.addEventListener('click', closeSyncModal);
+  btnModalBackTop?.addEventListener('click', closeSyncModal);
+  btnModalBackBottom?.addEventListener('click', closeSyncModal);
+
+  // 点击遮罩空白区域自动关闭
+  syncModalOverlay?.addEventListener('click', (e) => {
+    if (e.target === syncModalOverlay) {
+      closeSyncModal();
+    }
+  });
+
+  // 按 ESC 键快速返回
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && syncModalOverlay && syncModalOverlay.style.display !== 'none') {
+      closeSyncModal();
+    }
+  });
+
+  // Tab 选项卡切换 (本地文件备份 vs WebDAV 云端同步)
+  tabBtnLocal?.addEventListener('click', () => {
+    tabBtnLocal.classList.add('active');
+    tabBtnWebdav?.classList.remove('active');
+    if (paneLocalBackup) paneLocalBackup.style.display = 'block';
+    if (paneWebdavSync) paneWebdavSync.style.display = 'none';
+  });
+
+  tabBtnWebdav?.addEventListener('click', () => {
+    tabBtnWebdav.classList.add('active');
+    tabBtnLocal?.classList.remove('active');
+    if (paneWebdavSync) paneWebdavSync.style.display = 'block';
+    if (paneLocalBackup) paneLocalBackup.style.display = 'none';
+    refreshSyncView();
+  });
+
+  // 本地账号清单备份文件导出 (.json) - 零门槛，无需输入记忆口令
+  btnDoExportFile?.addEventListener('click', async () => {
+    try {
+      const manifest = await exportLocalManifest('');
+      const jsonStr = JSON.stringify(manifest, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const now = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const timeStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`;
+      a.href = url;
+      a.download = `mantra_accounts_backup_${timeStr}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('🎉 账号清单备份 (.json) 导出成功！');
+    } catch (err: any) {
+      showToast('❌ 导出备份异常: ' + (err?.message || '未知错误'));
+    }
+  });
+
+  // 本地文件选取并导入 - 零门槛，直接解析并 CRDT 智能合并
+  btnTriggerImportFile?.addEventListener('click', () => {
+    inputImportBackupFile?.click();
+  });
+
+  inputImportBackupFile?.addEventListener('change', async () => {
+    const file = inputImportBackupFile?.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      let manifest: any;
+      try {
+        manifest = JSON.parse(text);
+      } catch {
+        throw new Error('所选文件不是有效的 JSON 格式');
+      }
+
+      if (!manifest || typeof manifest !== 'object' || !manifest.domains) {
+        throw new Error('无效的备份文件结构（未包含 domains 节点）');
+      }
+
+      await importMergedManifest(manifest);
+      await loadDomainAccounts();
+      const domainCount = Object.keys(manifest.domains).length;
+      showToast(`🎉 成功导入并合并 ${domainCount} 个站点的账号清单！`);
+      closeSyncModal();
+    } catch (err: any) {
+      showToast('❌ 导入失败: ' + (err?.message || '文件损坏或格式不符'));
+    } finally {
+      if (inputImportBackupFile) inputImportBackupFile.value = '';
+    }
+  });
+
+  // WebDAV 状态刷新
   async function refreshSyncView() {
     const cfg = await getWebDAVConfig();
     const info = await getSyncStatus();
@@ -660,15 +840,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  btnOpenSyncModal?.addEventListener('click', () => {
-    if (syncModalOverlay) syncModalOverlay.style.display = 'flex';
-    refreshSyncView();
-  });
-
-  btnCloseSyncModal?.addEventListener('click', () => {
-    if (syncModalOverlay) syncModalOverlay.style.display = 'none';
-  });
-
   btnPopupSaveSync?.addEventListener('click', async () => {
     const currentCfg: WebDAVConfig = {
       serverUrl: syncInputUrl?.value?.trim() || '',
@@ -676,9 +847,29 @@ document.addEventListener('DOMContentLoaded', async () => {
       password: syncInputPass?.value?.trim() || '',
       remoteFileName: syncInputFile?.value?.trim() || 'mantra_sync.mkey'
     };
-    await saveWebDAVConfig(currentCfg);
-    await refreshSyncView();
-    showToast('WebDAV 配置已保存！');
+    if (btnPopupSaveSync) {
+      btnPopupSaveSync.textContent = '⏳ 保存中...';
+      btnPopupSaveSync.disabled = true;
+    }
+    try {
+      await saveWebDAVConfig(currentCfg);
+      await refreshSyncView();
+      if (btnPopupSaveSync) {
+        btnPopupSaveSync.textContent = '✅ 已保存配置';
+        btnPopupSaveSync.style.borderColor = 'var(--color-primary)';
+      }
+      showToast('✅ WebDAV 配置已保存！');
+    } catch (e: any) {
+      showToast('❌ 保存失败: ' + (e?.message || '未知错误'));
+    } finally {
+      setTimeout(() => {
+        if (btnPopupSaveSync) {
+          btnPopupSaveSync.textContent = '💾 保存配置';
+          btnPopupSaveSync.style.borderColor = '';
+          btnPopupSaveSync.disabled = false;
+        }
+      }, 1500);
+    }
   });
 
   btnPopupTestSync?.addEventListener('click', async () => {
@@ -688,19 +879,46 @@ document.addEventListener('DOMContentLoaded', async () => {
       password: syncInputPass?.value?.trim() || '',
       remoteFileName: syncInputFile?.value?.trim() || 'mantra_sync.mkey'
     };
-    if (btnPopupTestSync) btnPopupTestSync.textContent = '⏳ 测试中...';
+    if (!currentCfg.serverUrl) {
+      showToast('⚠️ 请先填写 WebDAV 服务器地址');
+      syncInputUrl?.focus();
+      return;
+    }
+    if (btnPopupTestSync) {
+      btnPopupTestSync.textContent = '⏳ 测试连接中...';
+      btnPopupTestSync.disabled = true;
+    }
     try {
       const res = await testWebDAVConnection(currentCfg);
-      alert(res.ok ? `✅ ${res.message}` : `❌ ${res.message}`);
+      if (res.ok) {
+        showToast(`✅ ${res.message}`);
+        if (btnPopupTestSync) {
+          btnPopupTestSync.textContent = '✅ 连接成功';
+          btnPopupTestSync.style.borderColor = 'var(--color-primary)';
+        }
+      } else {
+        showToast(`❌ ${res.message}`);
+        if (btnPopupTestSync) {
+          btnPopupTestSync.textContent = '❌ 连接失败';
+        }
+      }
+    } catch (e: any) {
+      showToast(`❌ 连接异常: ${e?.message || '未知错误'}`);
     } finally {
-      if (btnPopupTestSync) btnPopupTestSync.textContent = '⚡ 测试连接';
+      setTimeout(() => {
+        if (btnPopupTestSync) {
+          btnPopupTestSync.textContent = '⚡ 测试连接';
+          btnPopupTestSync.style.borderColor = '';
+          btnPopupTestSync.disabled = false;
+        }
+      }, 2000);
     }
   });
 
   btnPopupDoSync?.addEventListener('click', async () => {
     const session = await getSessionState();
     if (!session.isUnlocked || !session.mantra) {
-      alert('请先解锁会话输入主口令，端到端加解密需要主口令作为主密钥！');
+      showToast('⚠️ 请先输入记忆口令，端到端加密需要口令作为主密钥');
       return;
     }
 
@@ -712,11 +930,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     if (!currentCfg.serverUrl) {
-      alert('请先填写 WebDAV 服务器地址与账号密码');
+      showToast('⚠️ 请先填写 WebDAV 服务器地址与账号密码');
+      syncInputUrl?.focus();
       return;
     }
 
-    if (btnPopupDoSync) btnPopupDoSync.textContent = '⏳ 正在同步...';
+    if (btnPopupDoSync) {
+      btnPopupDoSync.textContent = '⏳ 正在进行双向加密同步...';
+      btnPopupDoSync.disabled = true;
+    }
     if (popupSyncStatusBadge) {
       popupSyncStatusBadge.className = 'sync-tag syncing';
       popupSyncStatusBadge.textContent = '🔄 同步中...';
@@ -726,12 +948,234 @@ document.addEventListener('DOMContentLoaded', async () => {
       const res = await performWebDAVSync(session.mantra, currentCfg);
       await refreshSyncView();
       await loadDomainAccounts();
-      alert(res.ok ? `🎉 ${res.message}` : `⚠️ 同步未完成: ${res.message}`);
+      showToast(res.ok ? `🎉 ${res.message}` : `⚠️ 同步未完成: ${res.message}`, 3000);
     } catch (e: any) {
-      alert(`❌ 同步发生异常: ${e?.message || '未知错误'}`);
+      showToast(`❌ 同步发生异常: ${e?.message || '未知错误'}`, 3000);
       await refreshSyncView();
     } finally {
-      if (btnPopupDoSync) btnPopupDoSync.textContent = '🔄 立即双向同步 (CRDT 合并)';
+      if (btnPopupDoSync) {
+        btnPopupDoSync.textContent = '🔄 立即双向同步 (CRDT 合并)';
+        btnPopupDoSync.disabled = false;
+      }
     }
+  });
+
+  // 17. 全部已存站点与账号清单全屏模态弹窗交互 (清单透明化)
+  const btnOpenAllManifest = document.getElementById('btn-open-all-manifest');
+  const manifestModalOverlay = document.getElementById('manifest-modal-overlay');
+  const btnCloseManifestModal = document.getElementById('btn-close-manifest-modal');
+  const btnManifestBackTop = document.getElementById('btn-manifest-back-top');
+  const btnManifestBackBottom = document.getElementById('btn-manifest-back-bottom');
+  const inputSearchManifest = document.getElementById('input-search-manifest') as HTMLInputElement | null;
+  const manifestDomainsContainer = document.getElementById('manifest-domains-container');
+
+  function closeManifestModal() {
+    if (manifestModalOverlay) {
+      manifestModalOverlay.style.display = 'none';
+    }
+  }
+
+  async function openManifestModal() {
+    if (manifestModalOverlay) {
+      manifestModalOverlay.style.display = 'flex';
+      if (inputSearchManifest) inputSearchManifest.value = '';
+      await renderAllManifest('');
+    }
+  }
+
+  async function renderAllManifest(filterText: string = '') {
+    if (!manifestDomainsContainer) return;
+    const query = filterText.trim().toLowerCase();
+    const manifest = await getAllAccountsManifest();
+
+    if (manifest.length === 0) {
+      manifestDomainsContainer.innerHTML = `
+        <div style="padding: 24px 12px; text-align: center; color: var(--color-text-muted);">
+          <div style="font-size: 24px; margin-bottom: 8px;">📋</div>
+          <div style="font-weight: 600; font-size: 13px; color: var(--color-text-main); margin-bottom: 4px;">暂无已存站点账号记录</div>
+          <div style="font-size: 11px;">在当前站点录入新账号后，所有记录将汇总展示于此。</div>
+        </div>
+      `;
+      return;
+    }
+
+    const filtered = manifest.filter((group) => {
+      if (!query) return true;
+      if (group.domain.toLowerCase().includes(query)) return true;
+      if (group.unicodeDomain.toLowerCase().includes(query)) return true;
+      if (group.serviceKey && group.serviceKey.toLowerCase().includes(query)) return true;
+      return group.accounts.some((acc) =>
+        acc.username.toLowerCase().includes(query) ||
+        (acc.serviceKey && acc.serviceKey.toLowerCase().includes(query))
+      );
+    });
+
+    if (filtered.length === 0) {
+      manifestDomainsContainer.innerHTML = `
+        <div style="padding: 24px 12px; text-align: center; color: var(--color-text-muted);">
+          <div style="font-size: 20px; margin-bottom: 6px;">🔍</div>
+          <div style="font-size: 12px;">未匹配到关于 "${query}" 的站点或账号</div>
+        </div>
+      `;
+      return;
+    }
+
+    manifestDomainsContainer.innerHTML = '';
+
+    for (const group of filtered) {
+      const card = document.createElement('div');
+      card.className = 'manifest-domain-card';
+      card.style.cssText = `
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        margin-bottom: 10px;
+        padding: 10px 12px;
+      `;
+
+      const isCurrentSite = group.domain.toLowerCase() === currentDomain.toLowerCase() ||
+                            group.unicodeDomain.toLowerCase() === currentDomain.toLowerCase();
+
+      const serviceTag = group.serviceKey ? `<span class="alias-tag-badge" style="margin-left: 6px;">🏷️ ${group.serviceKey}</span>` : '';
+
+      card.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px dashed var(--color-border);">
+          <div style="display: flex; align-items: center; gap: 6px; overflow: hidden;">
+            <span style="font-size: 14px;">🌐</span>
+            <span style="font-weight: 700; font-size: 13px; color: var(--color-text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${group.domain}">
+              ${group.unicodeDomain}
+            </span>
+            ${serviceTag}
+            ${isCurrentSite ? '<span style="font-size: 9.5px; background: rgba(13, 148, 136, 0.15); color: var(--color-primary); padding: 1px 5px; border-radius: 4px; font-weight: 600;">当前站点</span>' : ''}
+          </div>
+          <div style="display: flex; gap: 6px; flex-shrink: 0;">
+            ${!isCurrentSite ? `
+              <button type="button" class="btn-link-here btn-xs-primary" style="padding: 3px 8px; font-size: 10.5px; cursor: pointer;" title="将当前打开的网页关联为该站点的镜像别名">
+                🔗 关联当前网页
+              </button>
+            ` : ''}
+            <button type="button" class="btn-switch-domain btn-xs-muted" style="padding: 3px 8px; font-size: 10.5px; cursor: pointer;" title="在面板中切换管理此站点">
+              切换管理
+            </button>
+          </div>
+        </div>
+        <div class="manifest-acc-list" style="display: flex; flex-direction: column; gap: 6px;"></div>
+      `;
+
+      const accListContainer = card.querySelector('.manifest-acc-list') as HTMLElement;
+
+      for (const acc of group.accounts) {
+        const row = document.createElement('div');
+        row.style.cssText = `
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 6px 8px;
+          background: var(--color-surface-subtle);
+          border-radius: 6px;
+          font-size: 11px;
+        `;
+
+        row.innerHTML = `
+          <div style="display: flex; flex-direction: column; gap: 2px;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-weight: 600; color: var(--color-text-main);">${acc.username}</span>
+              <span style="font-size: 9.5px; color: var(--color-text-muted); background: var(--color-border); padding: 0 4px; border-radius: 3px;">v${acc.version}</span>
+            </div>
+            <div style="font-size: 9.5px; color: var(--color-text-muted);">${acc.rulePreset || 'standard-16'}</div>
+          </div>
+          <div style="display: flex; gap: 6px;">
+            <button type="button" class="btn-manifest-autofill btn-autofill-sm" style="padding: 3px 7px; font-size: 10px; cursor: pointer;">
+              ⚡ 填入网页
+            </button>
+            <button type="button" class="btn-manifest-copy btn-copy-pwd" style="padding: 3px 7px; font-size: 10px; cursor: pointer;">
+              📋 复制
+            </button>
+          </div>
+        `;
+
+        // 填入网页
+        row.querySelector('.btn-manifest-autofill')?.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!activeMantra) {
+            closeManifestModal();
+            inputMasterMantra.focus();
+            showToast('请先输入记忆口令以实时生成强密码');
+            return;
+          }
+          const derivationBase = acc.serviceKey || group.domain;
+          const pwd = await deriveSitePassword(activeMantra, derivationBase, acc.username, acc.version, acc.rulePreset);
+          chrome.runtime.sendMessage({
+            action: 'AUTOFILL_ACTIVE_TAB',
+            payload: { username: acc.username, password: pwd },
+          }, () => {
+            closeManifestModal();
+            showToast(`已向网页填入 [${acc.username}] 与强密码`);
+          });
+        });
+
+        // 复制密码
+        row.querySelector('.btn-manifest-copy')?.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!activeMantra) {
+            closeManifestModal();
+            inputMasterMantra.focus();
+            showToast('请先输入记忆口令以实时生成强密码');
+            return;
+          }
+          const derivationBase = acc.serviceKey || group.domain;
+          const pwd = await deriveSitePassword(activeMantra, derivationBase, acc.username, acc.version, acc.rulePreset);
+          await copyToClipboard(pwd, acc.username);
+        });
+
+        accListContainer.appendChild(row);
+      }
+
+      // 切换管理此站点
+      card.querySelector('.btn-switch-domain')?.addEventListener('click', () => {
+        currentDomain = group.domain;
+        currentDomainText.textContent = toUnicodeDomain(currentDomain);
+        currentDomainText.title = currentDomain;
+        loadDomainAccounts();
+        updateNewPwdPreview();
+        closeManifestModal();
+        showToast(`已切换至站点: ${group.unicodeDomain}`);
+      });
+
+      // 关联当前网页
+      card.querySelector('.btn-link-here')?.addEventListener('click', async () => {
+        const ok = await linkDomainToExisting(currentDomain, group.domain);
+        if (ok) {
+          await loadDomainAccounts();
+          closeManifestModal();
+          showToast(`已成功将当前站点 [${toUnicodeDomain(currentDomain)}] 关联至 [${group.unicodeDomain}]！`);
+        } else {
+          showToast('关联失败');
+        }
+      });
+
+      manifestDomainsContainer.appendChild(card);
+    }
+  }
+
+  btnOpenAllManifest?.addEventListener('click', openManifestModal);
+  btnCloseManifestModal?.addEventListener('click', closeManifestModal);
+  btnManifestBackTop?.addEventListener('click', closeManifestModal);
+  btnManifestBackBottom?.addEventListener('click', closeManifestModal);
+
+  manifestModalOverlay?.addEventListener('click', (e) => {
+    if (e.target === manifestModalOverlay) {
+      closeManifestModal();
+    }
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && manifestModalOverlay && manifestModalOverlay.style.display !== 'none') {
+      closeManifestModal();
+    }
+  });
+
+  inputSearchManifest?.addEventListener('input', () => {
+    renderAllManifest(inputSearchManifest.value);
   });
 });

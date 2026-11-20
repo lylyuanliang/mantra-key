@@ -11,6 +11,7 @@
       margin: 0 !important;
       padding: 0 !important;
       width: 410px !important;
+      min-height: 520px !important;
       background-color: var(--color-bg-void, #f8fafc) !important;
       color-scheme: light dark !important;
       overflow: hidden !important;
@@ -21,6 +22,7 @@
       padding: 0 !important;
       width: 100% !important;
       min-width: 100% !important;
+      min-height: 520px !important;
       background-color: var(--color-bg-void, #f8fafc) !important;
       color-scheme: light dark !important;
       overflow: hidden !important;
@@ -53,15 +55,15 @@
           <span class="canary-chip-dot"></span>
           <span id="header-canary-text">--------</span>
         </div>
-        <!-- 会话 TTL 状态胶囊 -->
-        <div class="session-pill locked" id="session-status-pill" title="主口令会话状态">
+        <!-- 记忆口令状态胶囊 -->
+        <div class="session-pill locked" id="session-status-pill" title="口令就绪状态">
           <span class="session-dot locked" id="session-dot"></span>
-          <span id="session-ttl-text">已锁定</span>
+          <span id="session-ttl-text">待输入</span>
         </div>
         <!-- WebDAV 同步入口按钮 -->
         <button class="btn-header-sync" id="btn-open-sync-modal" type="button" title="WebDAV 多端同步">🌐 同步</button>
-        <!-- 会话主动锁定按钮（仅解锁后呈现） -->
-        <button class="btn-lock" id="btn-lock-session" type="button" title="立即锁定并擦除会话" style="display: none;">锁定</button>
+        <!-- 口令清空按钮（仅就绪后呈现） -->
+        <button class="btn-lock" id="btn-lock-session" type="button" title="清空已输入的口令" style="display: none;">清空</button>
       </div>
     </header>
 
@@ -78,7 +80,10 @@
             <span class="domain-name" id="current-domain-text">读取中...</span>
           </div>
         </div>
-        <button class="btn-domain-edit" id="btn-edit-domain" type="button" title="自定义目标域名">✎ 切换</button>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn-domain-edit" id="btn-open-all-manifest" type="button" title="查看所有已存站点账号清单">📋 记录清单</button>
+          <button class="btn-domain-edit" id="btn-edit-domain" type="button" title="自定义目标域名">✎ 切换</button>
+        </div>
       </section>
 
       <!-- 域名修改输入行 (默认折叠) -->
@@ -89,19 +94,19 @@
       </div>
 
       <!-- 已保存账号区域 (常驻渲染，展示该站点下所有账号清单) -->
-      <div class="accounts-section" id="accounts-section" style="display: none;">
+      <div class="accounts-section" id="accounts-section">
         <div class="section-title">
-          <span>已存账号凭据 (<span id="acc-count-badge">0</span>)</span>
+          <span>本站已存账号 (<span id="acc-count-badge">0</span>)</span>
           <button type="button" class="btn-toggle-add" id="btn-toggle-add-section">+ 录入新账号</button>
         </div>
         <div class="account-list" id="account-list"></div>
       </div>
 
-      <!-- 视图 1: 会话锁定状态 (输入主口令，极简无多余小字微文案) -->
+      <!-- 视图 1: 记忆口令输入 (无库生成，极简无多余小字微文案) -->
       <section class="view-locked" id="view-locked">
         <div class="locked-card">
           <div class="locked-card-header">
-            <span class="locked-badge">🔒 主口令待解锁</span>
+            <span class="locked-badge">🔑 记忆口令</span>
             <span class="canary-hex" id="canary-preview-hex" title="防手抖校验指纹">--------</span>
           </div>
 
@@ -110,7 +115,7 @@
               type="password"
               id="input-master-mantra"
               class="cyber-input"
-              placeholder="输入您的唯一主口令..."
+              placeholder="输入您的记忆口令..."
               autocomplete="off"
               spellcheck="false"
             />
@@ -118,7 +123,7 @@
           </div>
 
           <button class="btn-cyber-primary" id="btn-unlock-submit" type="button">
-            ⚡ 立即解锁并派生 (15分钟)
+            ⚡ 立即生成并启用 (15分钟免输)
           </button>
         </div>
       </section>
@@ -135,6 +140,23 @@
             <div class="form-col flex-1">
               <label class="form-label" for="new-acc-user">账号 / 邮箱 / 用户名</label>
               <input type="text" id="new-acc-user" class="cyber-input" placeholder="输入用户名或邮箱 (如 user@domain.com)" />
+            </div>
+          </div>
+
+          <!-- 通用服务归属与别名映射 (支持三毛机场等常换域名的站点) -->
+          <div class="form-row" style="margin-top: 4px;">
+            <div class="form-col flex-1">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                <label class="form-label" for="new-acc-service" style="margin-bottom: 0;">通用服务标识 (Service Key / 别名)</label>
+                <span style="font-size: 9.5px; color: var(--color-primary); cursor: pointer;" id="btn-toggle-service-detail">💡 适配常变域名</span>
+              </div>
+              <input type="text" id="new-acc-service" class="cyber-input" placeholder="默认与当前站点相同，如: 三毛机场" />
+            </div>
+          </div>
+          <div class="form-row" id="service-aliases-wrap" style="display: none; margin-top: 2px;">
+            <div class="form-col flex-1">
+              <label class="form-label" for="new-acc-aliases">关联镜像域名别名 (逗号分隔)</label>
+              <input type="text" id="new-acc-aliases" class="cyber-input" placeholder="例如: *.三毛机场.com, cleanip.io, sanmao*.net" />
             </div>
           </div>
 
@@ -240,60 +262,140 @@
       <span class="footer-link" id="link-clear-all-domain" style="display: none;">清空本站凭据</span>
     </footer>
 
-    <!-- WebDAV 多端同步模态弹窗 -->
+    <!-- 多端同步与数据管理全屏模态弹窗 (防裁切、双Tab、可快速返回) -->
     <div class="sync-modal-overlay" id="sync-modal-overlay" style="display: none;">
       <div class="sync-modal">
+        <!-- 吸顶导航栏 (永远可见，提供大号返回按钮) -->
         <div class="sync-modal-header">
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <span>🌐</span>
-            <span style="font-weight: 700; font-size: 13px; color: var(--color-text-main);">WebDAV 端到端多端同步</span>
+          <div class="sync-header-left">
+            <button type="button" class="btn-modal-back" id="btn-modal-back-top" title="返回上一个界面">
+              <span>← 返回</span>
+            </button>
+            <span style="font-weight: 700; font-size: 13px; color: var(--color-text-main);">数据管理与同步</span>
           </div>
-          <button type="button" class="btn-close-sync" id="btn-close-sync-modal">✕</button>
+          <button type="button" class="btn-close-sync" id="btn-close-sync-modal" title="关闭并返回">✕</button>
+        </div>
+
+        <!-- 选项卡切换 (本地文件备份 vs WebDAV 云端同步) -->
+        <div class="modal-tabs">
+          <button type="button" class="modal-tab-btn active" id="tab-btn-local">📁 账号清单导入/导出</button>
+          <button type="button" class="modal-tab-btn" id="tab-btn-webdav">🌐 WebDAV 云端同步</button>
         </div>
 
         <div class="sync-modal-body">
-          <div class="sync-status-banner">
-            <span id="popup-sync-status-badge" class="sync-tag">未同步</span>
-            <span id="popup-sync-time-text" style="font-size: 10px; color: var(--color-text-muted);">上次同步: 尚未同步</span>
-          </div>
-
-          <div class="form-col" style="margin-top: 8px;">
-            <label class="form-label" for="sync-input-url">WebDAV 服务器地址</label>
-            <input type="text" id="sync-input-url" class="cyber-input" placeholder="例如: https://dav.jianguoyun.com/dav/" />
-          </div>
-
-          <div class="form-row" style="margin-top: 8px;">
-            <div class="form-col flex-1">
-              <label class="form-label" for="sync-input-user">用户名</label>
-              <input type="text" id="sync-input-user" class="cyber-input" placeholder="账号" />
+          <!-- 视图 A: 本地文件导入与导出 (支持离线多端流转) -->
+          <div id="pane-local-backup">
+            <div class="backup-card">
+              <div class="backup-title">
+                <span>📦 导出账号清单备份 (.json)</span>
+              </div>
+              <div class="backup-desc">
+                直接导出本地存储的所有站点与账号配置清单（不含任何密码或口令，随时一键导出），可用于多设备流转与离线备份。
+              </div>
+              <div class="backup-actions-row">
+                <button type="button" class="btn-backup-export" id="btn-do-export-file">
+                  <span>⬇ 导出备份文件 (.json)</span>
+                </button>
+              </div>
             </div>
-            <div class="form-col flex-1">
-              <label class="form-label" for="sync-input-pass">应用密码</label>
-              <input type="password" id="sync-input-pass" class="cyber-input" placeholder="应用独立密码" />
+
+            <div class="backup-card">
+              <div class="backup-title">
+                <span>📥 导入账号清单备份并合并</span>
+              </div>
+              <div class="backup-desc">
+                选取之前导出的 JSON 备份文件，系统采用 CRDT 智能去重合并，自动保留各站点最高版本与最新记录。
+              </div>
+              <div class="backup-actions-row">
+                <button type="button" class="btn-backup-import" id="btn-trigger-import-file">
+                  <span>⬆ 选取文件并导入</span>
+                </button>
+                <input type="file" id="input-import-backup-file" accept=".json" style="display: none;" />
+              </div>
             </div>
           </div>
 
-          <div class="form-col" style="margin-top: 8px;">
-            <label class="form-label" for="sync-input-file">远程文件名</label>
-            <input type="text" id="sync-input-file" class="cyber-input" value="mantra_sync.mkey" />
+          <!-- 视图 B: WebDAV 云端自动双向同步 -->
+          <div id="pane-webdav-sync" style="display: none;">
+            <div class="sync-status-banner">
+              <span id="popup-sync-status-badge" class="sync-tag">未同步</span>
+              <span id="popup-sync-time-text" style="font-size: 10px; color: var(--color-text-muted);">上次同步: 尚未同步</span>
+            </div>
+
+            <div class="form-col" style="margin-top: 8px;">
+              <label class="form-label" for="sync-input-url">WebDAV 服务器地址</label>
+              <input type="text" id="sync-input-url" class="cyber-input" placeholder="例如: https://dav.jianguoyun.com/dav/" />
+            </div>
+
+            <div class="form-row" style="margin-top: 8px;">
+              <div class="form-col flex-1">
+                <label class="form-label" for="sync-input-user">用户名</label>
+                <input type="text" id="sync-input-user" class="cyber-input" placeholder="账号" />
+              </div>
+              <div class="form-col flex-1">
+                <label class="form-label" for="sync-input-pass">应用密码</label>
+                <input type="password" id="sync-input-pass" class="cyber-input" placeholder="应用独立密码" />
+              </div>
+            </div>
+
+            <div class="form-col" style="margin-top: 8px;">
+              <label class="form-label" for="sync-input-file">远程文件名</label>
+              <input type="text" id="sync-input-file" class="cyber-input" value="mantra_sync.mkey" />
+            </div>
+
+            <div style="display: flex; gap: 8px; margin-top: 10px;">
+              <button type="button" class="btn-secondary" id="btn-popup-test-sync" style="flex: 1; padding: 7px; background: var(--color-surface-subtle); border: 1px solid var(--color-border); color: var(--color-text-main); border-radius: 6px; font-size: 11px; cursor: pointer;">
+                ⚡ 测试连接
+              </button>
+              <button type="button" class="btn-secondary" id="btn-popup-save-sync" style="flex: 1; padding: 7px; background: var(--color-surface-subtle); border: 1px solid var(--color-border); color: var(--color-text-main); border-radius: 6px; font-size: 11px; cursor: pointer;">
+                💾 保存配置
+              </button>
+            </div>
+
+            <button type="button" class="btn-primary" id="btn-popup-do-sync" style="width: 100%; margin-top: 10px; padding: 9px; font-weight: 700; background: var(--gradient-primary); border: none; border-radius: 6px; color: var(--color-btn-text); font-size: 12px; cursor: pointer;">
+              🔄 立即双向同步 (CRDT 合并)
+            </button>
+
+            <div style="font-size: 10px; color: var(--color-text-muted); line-height: 1.4; margin-top: 8px; background: var(--color-surface-subtle); border: 1px solid var(--color-border); padding: 6px 8px; border-radius: 6px;">
+              💡 <strong>零知识加密保障：</strong>本地使用记忆口令派生密钥进行 AES-256-GCM 加密，云端仅存储密文。
+            </div>
           </div>
 
-          <div style="display: flex; gap: 8px; margin-top: 10px;">
-            <button type="button" class="btn-secondary" id="btn-popup-test-sync" style="flex: 1; padding: 7px; background: var(--color-surface-subtle); border: 1px solid var(--color-border); color: var(--color-text-main); border-radius: 6px; font-size: 11px; cursor: pointer;">
-              ⚡ 测试连接
-            </button>
-            <button type="button" class="btn-secondary" id="btn-popup-save-sync" style="flex: 1; padding: 7px; background: var(--color-surface-subtle); border: 1px solid var(--color-border); color: var(--color-text-main); border-radius: 6px; font-size: 11px; cursor: pointer;">
-              💾 保存配置
+          <!-- 底部显眼返回大按钮 (确保任何时候都能瞬间退出) -->
+          <div class="sync-bottom-return-wrap">
+            <button type="button" class="btn-sync-bottom-return" id="btn-modal-back-bottom">
+              <span>← 返回上一个界面</span>
             </button>
           </div>
+        </div>
+      </div>
+    </div>
 
-          <button type="button" class="btn-primary" id="btn-popup-do-sync" style="width: 100%; margin-top: 10px; padding: 9px; font-weight: 700; background: var(--gradient-primary); border: none; border-radius: 6px; color: var(--color-btn-text); font-size: 12px; cursor: pointer;">
-            🔄 立即双向同步 (CRDT 合并)
+    <!-- 全站已存站点与账号清单总览模态面板 (清单完全透明化) -->
+    <div class="sync-modal-overlay" id="manifest-modal-overlay" style="display: none;">
+      <div class="sync-modal">
+        <div class="sync-modal-header">
+          <div class="sync-header-left">
+            <button type="button" class="btn-modal-back" id="btn-manifest-back-top" title="返回上一个界面">
+              <span>← 返回</span>
+            </button>
+            <span style="font-weight: 700; font-size: 13px; color: var(--color-text-main);">全部已存站点与账号清单</span>
+          </div>
+          <button type="button" class="btn-close-sync" id="btn-close-manifest-modal" title="关闭并返回">✕</button>
+        </div>
+
+        <div style="padding: 10px 12px; border-bottom: 1px solid var(--color-border); background: var(--color-surface-subtle);">
+          <input type="text" id="input-search-manifest" class="cyber-input" placeholder="🔍 搜索域名、服务标识或账号..." style="width: 100%; box-sizing: border-box;" />
+        </div>
+
+        <div class="sync-modal-body" id="manifest-domains-container" style="flex: 1; overflow-y: auto; padding: 12px;">
+          <!-- 动态注入各站点账号卡片组 -->
+        </div>
+
+        <div class="sync-bottom-return-wrap" style="padding: 10px 12px 24px 12px;">
+          <button type="button" class="btn-sync-bottom-return" id="btn-manifest-back-bottom">
+            <span>← 返回上一个界面</span>
           </button>
-
-          <div style="font-size: 10px; color: var(--color-text-muted); line-height: 1.4; margin-top: 8px; background: var(--color-surface-subtle); border: 1px solid var(--color-border); padding: 6px 8px; border-radius: 6px;">
-            💡 <strong>零知识加密保障：</strong>本地使用主口令派生密钥进行 AES-256-GCM 加密，云端仅存储密文，多端完全打通。
-          </div>
         </div>
       </div>
     </div>

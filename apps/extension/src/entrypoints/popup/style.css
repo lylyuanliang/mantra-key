@@ -115,14 +115,15 @@ html.dark {
   display: none !important;
 }
 
-/* 视窗画布全量铺满暗黑底色，杜绝亚像素漏白 */
+/* 视窗画布全量铺满主题底色，统一高度 */
 html {
   width: 410px;
   min-width: 410px;
+  min-height: 520px;
   margin: 0;
   padding: 0;
   background-color: var(--color-bg-void);
-  color-scheme: dark;
+  color-scheme: light dark;
   overflow: hidden;
   box-sizing: border-box;
 }
@@ -130,10 +131,11 @@ html {
 body {
   width: 100%;
   min-width: 100%;
+  min-height: 520px;
   margin: 0;
   padding: 0;
   background-color: var(--color-bg-void);
-  color-scheme: dark;
+  color-scheme: light dark;
   color: var(--color-text-main);
   font-family: var(--font-sans);
   font-size: 13px;
@@ -144,13 +146,14 @@ body {
   box-sizing: border-box;
 }
 
-/* 弹窗整体容器：自适应紧凑贴合，无任何强制 100% 撑开 */
+/* 弹窗整体容器：保持统一 520px 黄金舒适高度，杜绝矮小局促 */
 .popup-wrapper {
   position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
   min-width: 100%;
+  min-height: 520px;
   background-color: var(--color-bg-void);
   border: none;
   overflow: hidden;
@@ -1237,67 +1240,138 @@ body.is-unlocked .enclave-badge {
   text-decoration: underline;
 }
 
-/* ================== 复制反馈 Toast ================== */
+/* ================== 全局悬浮反馈 Toast ================== */
 .copy-toast {
-  position: absolute;
-  bottom: 16px;
+  position: fixed;
+  top: 18px;
   left: 50%;
   transform: translateX(-50%);
-  padding: 5px 12px;
+  padding: 7px 16px;
   border-radius: var(--radius-pill);
-  background: var(--color-primary);
-  color: #0b0f17;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
+  background: rgba(15, 23, 42, 0.94);
+  color: #ffffff;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
   font-weight: 600;
-  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.5);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(8px);
   display: none;
-  z-index: 9999;
+  z-index: 100000 !important;
   white-space: nowrap;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
-/* ================== WebDAV 多端同步模态层 ================== */
+[data-theme="dark"] .copy-toast {
+  background: rgba(30, 41, 59, 0.96);
+  color: #f8fafc;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+/* ================== 多端同步与数据管理模态层 ================== */
 .sync-modal-overlay {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(4px);
+  background-color: var(--color-bg-void);
   z-index: 10000;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 0;
 }
 
 [data-theme="dark"] .sync-modal-overlay {
-  background: rgba(11, 15, 23, 0.85);
+  background-color: var(--color-bg-void);
 }
 
 .sync-modal {
   width: 100%;
-  background: var(--color-surface-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-card);
-  box-shadow: var(--color-shadow-modal);
-  overflow: hidden;
+  min-height: 100%;
+  background-color: var(--color-bg-void);
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+  flex: 1;
 }
 
 .sync-modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
   padding: 10px 12px;
   border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  background-color: var(--color-surface-base);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.sync-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-modal-back {
   background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-main);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.btn-modal-back:hover {
+  background: var(--color-surface-hover);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.modal-tabs {
+  display: flex;
+  background: var(--color-surface-subtle);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modal-tab-btn {
+  flex: 1;
+  padding: 9px 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.modal-tab-btn:hover {
+  color: var(--color-text-main);
+}
+
+.modal-tab-btn.active {
+  color: var(--color-primary);
+  background: var(--color-surface-elevated);
+  border-bottom-color: var(--color-primary);
 }
 
 .btn-close-sync {
   background: transparent;
   border: none;
   color: var(--color-text-dim);
-  font-size: 14px;
+  font-size: 15px;
   cursor: pointer;
   padding: 2px 6px;
   border-radius: 4px;
@@ -1311,6 +1385,117 @@ body.is-unlocked .enclave-badge {
 
 .sync-modal-body {
   padding: 12px;
+  flex: 1;
+}
+
+.backup-card {
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.backup-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-main);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.backup-desc {
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+  line-height: 1.45;
+  margin-bottom: 10px;
+}
+
+.backup-actions-row {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-backup-export {
+  flex: 1;
+  padding: 8px;
+  background: var(--gradient-primary);
+  border: none;
+  border-radius: 6px;
+  color: var(--color-btn-text);
+  font-weight: 700;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.btn-backup-import {
+  flex: 1;
+  padding: 8px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-main);
+  font-weight: 600;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.btn-backup-import:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.sync-bottom-return-wrap {
+  margin-top: 14px;
+  padding-top: 10px;
+  padding-bottom: 24px;
+  border-top: 1px solid var(--color-border);
+}
+
+.btn-sync-bottom-return {
+  width: 100%;
+  padding: 9px;
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-main);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.btn-sync-bottom-return:hover {
+  background: var(--color-surface-hover);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.alias-tag-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(13, 148, 136, 0.12);
+  color: var(--color-primary);
+  border: 1px solid rgba(13, 148, 136, 0.3);
+  margin-left: 4px;
 }
 
 .sync-status-banner {
