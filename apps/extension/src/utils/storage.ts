@@ -2,12 +2,15 @@
  * 密诀 MantraKey - 本地持久化与安全会话存储模块
  */
 
-import { computeCanary, RulePreset, clearMasterSeedCache } from './crypto';
+import { computeCanary, type RulePreset, clearMasterSeedCache } from './crypto.ts';
+import { getRootDomain, toUnicodeDomain } from './domain.ts';
 
 export interface AccountRecord {
   username: string;
   version: number;
   rulePreset: RulePreset;
+  serviceKey?: string; // 通用服务归属标识 (如 "三毛机场")，用于跨域名派生对齐
+  aliases?: string[];  // 别名域名列表或通配模式 (如 ["cleanip.io", "gw-*.三毛机场.com"])
   tag?: string;
   createdAt: number;
   updatedAt: number;
@@ -24,22 +27,175 @@ const SESSION_STORAGE_KEY = 'mantra_active_session';
 const ACCOUNTS_PREFIX = 'mantra_accs_';
 
 /**
- * 获取指定域名的账号列表
+ * 判断目标域名是否匹配别名模式 (支持精确匹配、Unicode/Punycode 归一化与 *.xxx.com 通配符)
  */
-export async function getAccountsForDomain(domain: string): Promise<AccountRecord[]> {
-  if (!domain) return [];
-  const key = `${ACCOUNTS_PREFIX}${domain.toLowerCase()}`;
-  try {
-    const result = await chrome.storage.local.get([key]);
-    const list = result[key];
-    if (Array.isArray(list)) {
-      return list as AccountRecord[];
+export function matchDomainAlias(pattern: string, targetDomain: string): boolean {
+  if (!pattern || !targetDomain) return false;
+  const p = pattern.trim().toLowerCase();
+  const pUnicode = toUnicodeDomain(p).toLowerCase();
+  const t = targetDomain.trim().toLowerCase();
+  const tUnicode = toUnicodeDomain(t).toLowerCase();
+  const tRoot = getRootDomain(t);
+  const tRootUnicode = toUnicodeDomain(tRoot).toLowerCase();
+
+  const targets = Array.from(new Set([t, tUnicode, tRoot, tRootUnicode])).filter(Boolean);
+  const patterns = Array.from(new Set([p, pUnicode])).filter(Boolean);
+
+  for (const pat of patterns) {
+    for (const tgt of targets) {
+      if (pat === tgt) return true;
+      if (pat.startsWith('*.') && pat.slice(2) === tgt) return true;
+      if (pat.includes('*')) {
+        const regexStr = '^' + pat.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$';
+        try {
+          if (new RegExp(regexStr).test(tgt)) return true;
+        } catch {}
+      }
     }
-    return [];
+  }
+  return false;
+}
+
+/**
+ * 获取指定域名的账号列表 (支持本域直查 + 根域名继承 + 跨域名别名 + 服务归属/标题智能识别)
+ */
+export async function getAccountsForDomain(domain: string, pageTitle = ''): Promise<AccountRecord[]> {
+  if (!domain) return [];
+  const rawDomain = domain.trim().toLowerCase();
+  const unicodeDomain = toUnicodeDomain(rawDomain).toLowerCase();
+  const rootRaw = getRootDomain(rawDomain);
+  const rootUnicode = toUnicodeDomain(rootRaw).toLowerCase();
+
+  const candidateDomains = Array.from(
+    new Set([rawDomain, unicodeDomain, rootRaw, rootUnicode])
+  ).filter(Boolean);
+
+  try {
+    const allStorage = await chrome.storage.local.get(null);
+    const resultMap = new Map<string, AccountRecord>();
+
+    // 1. 先加入本域名及其根域名、Unicode 形式直接绑定的账号
+    for (const cand of candidateDomains) {
+      const key = `${ACCOUNTS_PREFIX}${cand}`;
+      const list = Array.isArray(allStorage[key]) ? (allStorage[key] as AccountRecord[]) : [];
+      for (const item of list) {
+        if (item?.username && !resultMap.has(item.username.toLowerCase())) {
+          resultMap.set(item.username.toLowerCase(), {
+            ...item,
+            tag: item.tag || (cand !== rawDomain ? `根域匹配: ${cand}` : undefined)
+          });
+        }
+      }
+    }
+
+    // 2. 扫描其它站点的别名定义与通用服务标识 (如三毛机场镜像站、cleanip.io 等)
+    for (const [key, val] of Object.entries(allStorage)) {
+      if (!key.startsWith(ACCOUNTS_PREFIX) || !Array.isArray(val)) {
+        continue;
+      }
+      for (const item of val as AccountRecord[]) {
+        if (!item?.username || resultMap.has(item.username.toLowerCase())) continue;
+
+        // 2.1 检查别名列表中是否有匹配当前候选域名的模式
+        const aliases = Array.isArray(item.aliases) ? item.aliases : [];
+        const isAliasMatched = aliases.some((pattern) =>
+          candidateDomains.some((cand) => matchDomainAlias(pattern, cand))
+        );
+
+        // 2.2 检查服务标识 (如 serviceKey: '三毛机场') 是否匹配域名文本 (如 gw-1.三毛机场.com)
+        const serviceKey = (item.serviceKey || '').trim().toLowerCase();
+        const isServiceMatched =
+          Boolean(serviceKey) &&
+          candidateDomains.some(
+            (cand) => cand.includes(serviceKey) || serviceKey.includes(cand)
+          );
+
+        // 2.3 检查网页标题是否匹配服务标识 (如网页标题为 "三毛机场 - 登录")
+        const isTitleMatched =
+          Boolean(serviceKey) &&
+          Boolean(pageTitle) &&
+          pageTitle.toLowerCase().includes(serviceKey);
+
+        if (isAliasMatched || isServiceMatched || isTitleMatched) {
+          resultMap.set(item.username.toLowerCase(), {
+            ...item,
+            tag: item.tag || (item.serviceKey ? `服务: ${item.serviceKey}` : (isTitleMatched ? `标题识别: ${serviceKey}` : '镜像同步'))
+          });
+        }
+      }
+    }
+
+    return Array.from(resultMap.values());
   } catch (e) {
     console.warn('[MantraKey Storage] 读取账号列表失败:', e);
     return [];
   }
+}
+
+export interface DomainAccountsGroup {
+  domain: string;
+  unicodeDomain: string;
+  serviceKey?: string;
+  accounts: AccountRecord[];
+}
+
+/**
+ * 获取全量已保存站点与账号清单（支持用户纵览所有记录）
+ */
+export async function getAllAccountsManifest(): Promise<DomainAccountsGroup[]> {
+  try {
+    const allStorage = await chrome.storage.local.get(null);
+    const groups: DomainAccountsGroup[] = [];
+
+    for (const [key, val] of Object.entries(allStorage)) {
+      if (key.startsWith(ACCOUNTS_PREFIX) && Array.isArray(val) && val.length > 0) {
+        const domain = key.substring(ACCOUNTS_PREFIX.length);
+        const accounts = val as AccountRecord[];
+        const serviceKey = accounts.find((a) => a.serviceKey)?.serviceKey;
+        groups.push({
+          domain,
+          unicodeDomain: toUnicodeDomain(domain),
+          serviceKey,
+          accounts,
+        });
+      }
+    }
+    return groups;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 将某个已有域名的账号或服务关联到当前域名 (快速设为别名)
+ */
+export async function linkDomainToExisting(targetDomain: string, sourceDomain: string): Promise<boolean> {
+  if (!targetDomain || !sourceDomain) return false;
+  const sourceKey = `${ACCOUNTS_PREFIX}${sourceDomain.toLowerCase()}`;
+  const allStorage = await chrome.storage.local.get(null);
+  const sourceAccs = allStorage[sourceKey] as AccountRecord[] | undefined;
+  if (!Array.isArray(sourceAccs) || sourceAccs.length === 0) return false;
+
+  const targetUnicode = toUnicodeDomain(targetDomain).toLowerCase();
+  const targetRaw = targetDomain.toLowerCase();
+
+  const updated = sourceAccs.map((acc) => {
+    const existingAliases = Array.isArray(acc.aliases) ? [...acc.aliases] : [];
+    if (!existingAliases.includes(targetUnicode)) {
+      existingAliases.push(targetUnicode);
+    }
+    if (!existingAliases.includes(targetRaw) && targetRaw !== targetUnicode) {
+      existingAliases.push(targetRaw);
+    }
+    return {
+      ...acc,
+      aliases: existingAliases,
+      updatedAt: Date.now()
+    };
+  });
+
+  await chrome.storage.local.set({ [sourceKey]: updated });
+  return true;
 }
 
 /**

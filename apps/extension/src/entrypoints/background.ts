@@ -128,7 +128,7 @@ export default defineBackground(() => {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const { action, payload } = message || {};
 
-    // 1. 获取当前活动标签页真实域名
+    // 1. 获取当前活动标签页真实域名与网页标题
     if (action === 'GET_CURRENT_DOMAIN') {
       chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
         const rawUrl = tab?.url || '';
@@ -138,9 +138,17 @@ export default defineBackground(() => {
         } else if (!domain) {
           domain = 'localhost';
         }
-        sendResponse({ domain, tabId: tab?.id });
+        sendResponse({ domain, tabId: tab?.id, title: tab?.title || '' });
       }).catch((err) => {
         sendResponse({ domain: 'localhost', error: err?.message });
+      });
+      return true;
+    }
+
+    // 1.1 获取当前激活的主题 (light / dark)
+    if (action === 'GET_THEME') {
+      chrome.storage.local.get(['mantra_theme']).then((res) => {
+        sendResponse({ theme: res?.mantra_theme || 'light' });
       });
       return true;
     }
@@ -182,11 +190,15 @@ export default defineBackground(() => {
     // 3. 实时派生强密码
     if (action === 'DERIVE_CREDENTIAL') {
       const domain = (payload?.domain as string) || '';
+      const serviceKey = (payload?.serviceKey as string) || '';
       const username = (payload?.username as string) || '';
       const version = (payload?.version as number) || 1;
       const rulePreset = (payload?.rule_preset as RulePreset) || 'standard-16';
 
-      sendNativeRequest('DERIVE_CREDENTIAL', payload).then(async (nativeRes) => {
+      // 核心解耦：若指定了统一服务标识 (如 "三毛机场")，优先以 serviceKey 作为派生盐基准，彻底消除镜像域名漂移导致密码变化
+      const derivationBase = serviceKey.trim() || domain.trim();
+
+      sendNativeRequest('DERIVE_CREDENTIAL', { ...payload, domain: derivationBase }).then(async (nativeRes) => {
         if (nativeRes && nativeRes.status === 'ok' && (nativeRes.data as { derived_password?: string })?.derived_password) {
           sendResponse(nativeRes);
           return;
@@ -197,7 +209,7 @@ export default defineBackground(() => {
           sendResponse({
             status: 'error',
             code: 401,
-            message: '主口令会话未解锁，请先输入主口令',
+            message: '记忆口令未就绪，请先输入记忆口令',
           });
           return;
         }
@@ -205,7 +217,7 @@ export default defineBackground(() => {
         try {
           const derivedPassword = await deriveSitePassword(
             session.mantra,
-            domain,
+            derivationBase,
             username,
             version,
             rulePreset
@@ -231,10 +243,11 @@ export default defineBackground(() => {
       return true;
     }
 
-    // 4. 读取指定域名的账号列表
+    // 4. 读取指定域名的账号列表 (支持域名与标题联动识别)
     if (action === 'GET_ACCOUNTS_FOR_DOMAIN') {
       const domain = (payload?.domain as string) || '';
-      getAccountsForDomain(domain).then((accounts) => {
+      const title = (payload?.title as string) || '';
+      getAccountsForDomain(domain, title).then((accounts) => {
         sendResponse({ status: 'ok', accounts });
       }).catch(() => {
         sendResponse({ status: 'ok', accounts: [] });
@@ -295,7 +308,7 @@ export default defineBackground(() => {
     if (action === 'UNLOCK_SESSION') {
       const mantra = (payload?.mantra as string) || '';
       if (!mantra) {
-        sendResponse({ status: 'error', message: '主口令不能为空' });
+        sendResponse({ status: 'error', message: '记忆口令不能为空' });
         return false;
       }
       unlockSession(mantra, 900).then((session) => {

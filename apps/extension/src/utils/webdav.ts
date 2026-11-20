@@ -7,14 +7,16 @@
  *    自动拉取远程密文信封解密、本地合并后加密回传。
  */
 
-import { RulePreset } from './crypto';
-import { AccountRecord } from './storage';
+import { type RulePreset } from './crypto.ts';
+import { type AccountRecord } from './storage.ts';
 
 export interface SyncAccountEntry {
   username: string;
   version: number;
   updatedAt: number;
   isDeleted: boolean;
+  serviceKey?: string;
+  aliases?: string[];
 }
 
 export interface SyncDomainEntry {
@@ -113,7 +115,9 @@ export async function exportLocalManifest(canaryHash = ''): Promise<ExtensionMan
           username: acc.username,
           version: acc.version || 1,
           updatedAt: acc.updatedAt || Date.now(),
-          isDeleted: false
+          isDeleted: false,
+          serviceKey: acc.serviceKey,
+          aliases: acc.aliases
         };
         if (acc.updatedAt && acc.updatedAt > maxUpdatedAt) {
           maxUpdatedAt = acc.updatedAt;
@@ -142,12 +146,14 @@ export async function exportLocalManifest(canaryHash = ''): Promise<ExtensionMan
 }
 
 /**
- * 将合并后的 Manifest 写回 Extension 本地存储
+ * 将合并后的 Manifest 写回 Extension 本地存储 (CvRDT 智能去重合并)
  */
-export async function importMergedManifest(manifest: ExtensionManifest): Promise<void> {
+export async function importMergedManifest(incomingManifest: ExtensionManifest): Promise<void> {
+  const localManifest = await exportLocalManifest('');
+  const merged = mergeManifests(localManifest, incomingManifest);
   const updates: Record<string, AccountRecord[]> = {};
 
-  for (const [domain, entry] of Object.entries(manifest.domains || {})) {
+  for (const [domain, entry] of Object.entries(merged.domains || {})) {
     const key = `${ACCOUNTS_PREFIX}${domain.toLowerCase()}`;
     const accountList: AccountRecord[] = [];
 
@@ -157,6 +163,8 @@ export async function importMergedManifest(manifest: ExtensionManifest): Promise
         username: acc.username,
         version: acc.version || 1,
         rulePreset: (entry.rulePreset as RulePreset) || 'standard-16',
+        serviceKey: acc.serviceKey,
+        aliases: acc.aliases,
         createdAt: acc.updatedAt || Date.now(),
         updatedAt: acc.updatedAt || Date.now()
       });
@@ -197,7 +205,17 @@ export function mergeManifests(local: ExtensionManifest, remote: ExtensionManife
           combinedAccounts[userKey] = remoteAcc;
         } else {
           if (remoteAcc.version > localAcc.version || (remoteAcc.version === localAcc.version && remoteAcc.updatedAt > localAcc.updatedAt)) {
-            combinedAccounts[userKey] = remoteAcc;
+            combinedAccounts[userKey] = {
+              ...remoteAcc,
+              serviceKey: remoteAcc.serviceKey || localAcc.serviceKey,
+              aliases: remoteAcc.aliases || localAcc.aliases
+            };
+          } else {
+            combinedAccounts[userKey] = {
+              ...localAcc,
+              serviceKey: localAcc.serviceKey || remoteAcc.serviceKey,
+              aliases: localAcc.aliases || remoteAcc.aliases
+            };
           }
         }
       }
@@ -359,7 +377,7 @@ export async function performWebDAVSync(
   config?: WebDAVConfig
 ): Promise<{ ok: boolean; message: string; mergedCount: number }> {
   if (!masterMantra || !masterMantra.trim()) {
-    return { ok: false, message: '请先解锁会话并输入主口令', mergedCount: 0 };
+    return { ok: false, message: '请先输入记忆口令', mergedCount: 0 };
   }
 
   const cfg = config || await getWebDAVConfig();

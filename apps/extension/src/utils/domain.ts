@@ -100,3 +100,23 @@ export function extractDomain(rawUrl: string): string {
     return '';
   }
 }
+
+/**
+ * 提取主域名/根域名 (eTLD+1)，用于子域名自动继承匹配父站点凭据
+ * 例如: gw-1.三毛机场.com -> 三毛机场.com
+ *      gw-1.xn--ehqx7tcnnope.com -> xn--ehqx7tcnnope.com
+ *      login.cleanip.io -> cleanip.io
+ */
+export function getRootDomain(domain: string): string {
+  if (!domain || typeof domain !== 'string') return '';
+  const d = domain.trim().toLowerCase();
+  const parts = d.split('.');
+  if (parts.length <= 2) return d;
+
+  const doubleTlds = ['com.cn', 'org.cn', 'net.cn', 'gov.cn', 'edu.cn', 'co.uk', 'com.hk'];
+  const lastTwo = parts.slice(-2).join('.');
+  if (doubleTlds.includes(lastTwo) && parts.length > 2) {
+    return parts.slice(-3).join('.');
+  }
+  return parts.slice(-2).join('.');
+}
