@@ -1,0 +1,650 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    密诀 (MantraKey) Screen 03: Android 专属辅助穿透输入法键盘面板
+    黑曜密符 (Obsidian Cipher) 设计代币高保真落地
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/layout_penetration_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/bg_surface_lowest"
+    android:orientation="vertical"
+    android:paddingBottom="6dp">
+
+    <!-- 顶部状态栏: 包名嗅探、TEE 15分钟会话生物识别胶囊与输入法切回键 -->
+    <LinearLayout
+        android:id="@+id/layout_ime_header"
+        android:layout_width="match_parent"
+        android:layout_height="42dp"
+        android:background="@color/bg_surface_container_low"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp">
+
+        <!-- 目标应用前台嗅探胶囊 -->
+        <LinearLayout
+            android:id="@+id/chip_package_inspector"
+            android:layout_width="0dp"
+            android:layout_height="28dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_obsidian_chip"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp">
+
+            <!-- 翡翠绿呼吸微灯 -->
+            <View
+                android:id="@+id/view_active_beacon"
+                android:layout_width="6dp"
+                android:layout_height="6dp"
+                android:layout_marginEnd="6dp"
+                android:background="@color/color_primary" />
+
+            <TextView
+                android:id="@+id/tv_pkg_prefix"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="pkg: "
+                android:textColor="@color/text_outline"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/tv_target_package"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="monospace"
+                android:maxLines="1"
+                android:text="com.cmbchina.ccd.pluto"
+                android:textColor="@color/text_on_surface"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:text="➔"
+                android:textColor="@color/color_primary"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/tv_target_domain"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="cmbchina.com"
+                android:textColor="@color/color_primary"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- 生物识别 15 分钟会话倒计时胶囊 -->
+        <LinearLayout
+            android:id="@+id/chip_biometric_status"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_badge_primary"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp">
+
+            <ImageView
+                android:layout_width="14dp"
+                android:layout_height="14dp"
+                android:layout_marginEnd="4dp"
+                android:src="@drawable/ic_fingerprint" />
+
+            <TextView
+                android:id="@+id/tv_biometric_session"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="Verified (14:10)"
+                android:textColor="@color/color_primary"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- 切回原系统键盘按键 -->
+        <Button
+            android:id="@+id/btn_switch_native"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_tool_button"
+            android:drawableStart="@drawable/ic_language"
+            android:drawablePadding="4dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:text="Switch Native"
+            android:textAllCaps="false"
+            android:textColor="@color/text_on_surface"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <!-- 密诀密码学引擎标头 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="4dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="MantraKey (密诀) Enclave Engine"
+            android:textColor="@color/color_primary"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/bg_badge_primary"
+            android:fontFamily="monospace"
+            android:paddingStart="4dp"
+            android:paddingTop="1dp"
+            android:paddingEnd="4dp"
+            android:paddingBottom="1dp"
+            android:text="ARGON2ID"
+            android:textColor="@color/color_primary"
+            android:textSize="9sp"
+            android:textStyle="bold" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Preset Memory Loaded"
+            android:textColor="@color/text_outline"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <!-- 凭据流轮播 (HorizontalScrollView 支持横向点选卡片) -->
+    <HorizontalScrollView
+        android:id="@+id/scroll_credentials"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:overScrollMode="never"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <!-- 卡片 1: 目标激活凭据卡 (翡翠绿霓虹发光描边) -->
+            <LinearLayout
+                android:id="@+id/card_active_credential"
+                android:layout_width="280dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_active_card"
+                android:orientation="vertical"
+                android:padding="10dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <ImageView
+                        android:layout_width="16dp"
+                        android:layout_height="16dp"
+                        android:layout_marginEnd="6dp"
+                        android:src="@drawable/ic_key" />
+
+                    <TextView
+                        android:id="@+id/tv_active_account"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:ellipsize="end"
+                        android:fontFamily="monospace"
+                        android:maxLines="1"
+                        android:text="6214-8899-****-1024"
+                        android:textColor="@color/text_on_surface"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_badge_primary"
+                        android:fontFamily="monospace"
+                        android:paddingStart="6dp"
+                        android:paddingTop="2dp"
+                        android:paddingEnd="6dp"
+                        android:paddingBottom="2dp"
+                        android:text="ACTIVE HOOK"
+                        android:textColor="@color/color_primary"
+                        android:textSize="9sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tv_active_preset"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Preset-3: Alphanumeric No-Symbols 16-char (v1)"
+                    android:textColor="@color/text_on_surface_variant"
+                    android:textSize="11sp" />
+
+                <!-- 掩码预览行 (带 160-bit 标签、眼睛预览与复制) -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="32dp"
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/bg_obsidian_chip"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="6dp">
+
+                    <TextView
+                        android:id="@+id/tv_masked_password"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="monospace"
+                        android:letterSpacing="0.1"
+                        android:text="••••••••••••••••"
+                        android:textColor="@color/color_primary"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="monospace"
+                        android:text="160-bit"
+                        android:textColor="@color/text_outline"
+                        android:textSize="10sp" />
+
+                    <ImageView
+                        android:id="@+id/btn_peek_password"
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:layout_marginStart="6dp"
+                        android:contentDescription="Peek Password"
+                        android:padding="3dp"
+                        android:src="@drawable/ic_visibility" />
+
+                    <ImageView
+                        android:id="@+id/btn_copy_password"
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:layout_marginStart="4dp"
+                        android:contentDescription="Copy Password"
+                        android:padding="3dp"
+                        android:src="@drawable/ic_copy" />
+                </LinearLayout>
+
+                <!-- 盐值派生签名微标 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/tv_active_salt"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:ellipsize="end"
+                        android:fontFamily="monospace"
+                        android:maxLines="1"
+                        android:text="Salt: cmbchina.com:621488991024:v1"
+                        android:textColor="@color/text_outline"
+                        android:textSize="9sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="monospace"
+                        android:text="Iter: 64MB/t=3"
+                        android:textColor="@color/color_primary"
+                        android:textSize="9sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- 卡片 2: 备用账号卡 (深灰轮廓) -->
+            <LinearLayout
+                android:id="@+id/card_secondary_credential"
+                android:layout_width="200dp"
+                android:layout_height="match_parent"
+                android:background="@drawable/bg_secondary_card"
+                android:orientation="vertical"
+                android:padding="10dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/tv_secondary_account"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:ellipsize="end"
+                        android:fontFamily="monospace"
+                        android:maxLines="1"
+                        android:text="corp_finance_admin"
+                        android:textColor="@color/text_on_surface"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <ImageView
+                        android:layout_width="14dp"
+                        android:layout_height="14dp"
+                        android:src="@drawable/ic_key" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Preset-1: High-Entropy 24-char"
+                    android:textColor="@color/text_on_surface_variant"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:ellipsize="end"
+                    android:fontFamily="monospace"
+                    android:maxLines="1"
+                    android:text="Salt: cmbchina.com:corp_fin:v2"
+                    android:textColor="@color/text_outline"
+                    android:textSize="9sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_badge_outline"
+                        android:fontFamily="monospace"
+                        android:paddingStart="4dp"
+                        android:paddingTop="1dp"
+                        android:paddingEnd="4dp"
+                        android:paddingBottom="1dp"
+                        android:text="v2 STEP"
+                        android:textColor="@color/text_outline"
+                        android:textSize="9sp" />
+
+                    <View
+                        android:layout_width="0dp"
+                        android:layout_height="0dp"
+                        android:layout_weight="1" />
+
+                    <TextView
+                        android:id="@+id/btn_select_secondary"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Select"
+                        android:textColor="@color/color_primary"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </HorizontalScrollView>
+
+    <!-- 工具与强行穿透注入主操作栏 -->
+    <LinearLayout
+        android:id="@+id/layout_actions_row"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:layout_marginTop="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp">
+
+        <!-- 工具 1: 2FA / TOTP 动态口令工具 -->
+        <LinearLayout
+            android:id="@+id/btn_tool_totp"
+            android:layout_width="110dp"
+            android:layout_height="match_parent"
+            android:background="@drawable/bg_tool_button"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:padding="4dp">
+
+            <ImageView
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:layout_marginEnd="6dp"
+                android:src="@drawable/ic_timer" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="2FA CODE"
+                    android:textColor="@color/text_outline"
+                    android:textSize="8sp" />
+
+                <TextView
+                    android:id="@+id/tv_totp_code"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="892041"
+                    android:textColor="@color/text_on_surface"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 工具 2: 版本步进器 (± v1) -->
+        <LinearLayout
+            android:id="@+id/btn_tool_stepper"
+            android:layout_width="60dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/bg_tool_button"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="2dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="EPOCH"
+                android:textColor="@color/text_outline"
+                android:textSize="8sp" />
+
+            <TextView
+                android:id="@+id/tv_stepper_version"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="± v1"
+                android:textColor="@color/color_primary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- 强行穿透注入大按钮 (直接调用 commitText 100% 击穿银行输入限制) -->
+        <Button
+            android:id="@+id/btn_penetrate_commit"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="6dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_penetration_button"
+            android:drawableStart="@drawable/ic_bolt"
+            android:drawablePadding="6dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="⚡ 强行穿透注入 (CommitText)"
+            android:textAllCaps="false"
+            android:textColor="@color/text_on_primary_fixed"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- 底部极客导航栏 -->
+    <LinearLayout
+        android:id="@+id/layout_bottom_nav"
+        android:layout_width="match_parent"
+        android:layout_height="38dp"
+        android:layout_marginTop="8dp"
+        android:background="@color/bg_surface_container_low"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp">
+
+        <LinearLayout
+            android:id="@+id/nav_vault"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:layout_width="14dp"
+                android:layout_height="14dp"
+                android:layout_marginEnd="4dp"
+                android:src="@drawable/ic_key" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Vault"
+                android:textColor="@color/text_on_surface_variant"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- 当前激活状态: 确定性派生引擎 -->
+        <LinearLayout
+            android:id="@+id/nav_derive"
+            android:layout_width="0dp"
+            android:layout_height="30dp"
+            android:layout_weight="1.2"
+            android:background="@drawable/bg_nav_active"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:layout_marginEnd="4dp"
+                android:src="@drawable/ic_calculate" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Derive"
+                android:textColor="@color/color_primary"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/nav_totp"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:layout_width="14dp"
+                android:layout_height="14dp"
+                android:layout_marginEnd="4dp"
+                android:src="@drawable/ic_timer" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="TOTP 2FA"
+                android:textColor="@color/text_on_surface_variant"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/nav_settings"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:layout_width="14dp"
+                android:layout_height="14dp"
+                android:layout_marginEnd="4dp"
+                android:src="@drawable/ic_settings" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Settings"
+                android:textColor="@color/text_on_surface_variant"
+                android:textSize="11sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 底边技术微标 -->
+    <TextView
+        android:id="@+id/tv_footer_pipe"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:fontFamily="monospace"
+        android:gravity="center"
+        android:text="@string/footer_tech_pipe"
+        android:textColor="@color/text_outline"
+        android:textSize="9sp" />
+
+    <!-- 系统手势栏药丸条 -->
+    <View
+        android:layout_width="96dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginTop="4dp"
+        android:background="@drawable/bg_obsidian_chip" />
+
+</LinearLayout>

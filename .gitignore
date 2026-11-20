@@ -1,0 +1,17 @@
+docs/handoffs/
+/target
+node_modules/
+dist/
+.output/
+.wxt/
+.DS_Store
+.gradle/
+**/build/
+*.apk
+*.aab
+local.properties
+.codegraph/
+scratch/
+releases/
+.kotlin/
+*.log

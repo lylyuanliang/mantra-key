@@ -1,0 +1,17 @@
+{
+  "name": "mantra-key-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build:extension": "pnpm --filter @mantra-key/extension build",
+    "dev:extension": "pnpm --filter @mantra-key/extension dev",
+    "dev:android": "pnpm --filter @mantra-key/android-web dev",
+    "sentinel": "agent-feedback watch --dir scratch/feedback",
+    "lint": "prettier --check .",
+    "test:crates": "cargo test --workspace"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.0",
+    "typescript": "^5.4.5"
+  }
+}

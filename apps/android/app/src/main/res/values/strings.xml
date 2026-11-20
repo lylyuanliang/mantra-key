@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">密诀</string>
+    <string name="ime_label">密诀辅助穿透键盘</string>
+    <string name="ime_subtype_penetration">密诀穿透模式</string>
+    <string name="autofill_service_label">密诀自动填充服务</string>
+
+    <!-- Screen 03 核心文案 -->
+    <string name="penetration_commit_action">⚡ 强行穿透注入</string>
+    <string name="penetration_commit_sub"> (CommitText)</string>
+    <string name="switch_native_ime">🌐 Switch Native</string>
+    <string name="biometric_verified_title">Verified (14:10)</string>
+    <string name="biometric_auth_prompt_title">密诀安全验证</string>
+    <string name="biometric_auth_prompt_subtitle">请验证指纹或面容以解锁 TEE 安全会话</string>
+    <string name="engine_title">MantraKey (密诀) Enclave Engine</string>
+    <string name="badge_argon2id">ARGON2ID</string>
+    <string name="badge_active_hook">ACTIVE HOOK</string>
+    <string name="footer_tech_pipe">Android InputConnection Direct Pipe • Bypasses Autofill Blacklists • Zero Memory Storage</string>
+</resources>

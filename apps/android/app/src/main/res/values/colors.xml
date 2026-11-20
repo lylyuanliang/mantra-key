@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Obsidian Cipher (黑曜密符) 基础语义代币 -->
+    <color name="bg_surface_lowest">#0B0E14</color>
+    <color name="bg_surface">#10131A</color>
+    <color name="bg_surface_container_low">#191C22</color>
+    <color name="bg_surface_container">#1D2026</color>
+    <color name="bg_surface_container_high">#272A31</color>
+
+    <!-- 翡翠绿核心安全色系 -->
+    <color name="color_primary">#10B981</color>
+    <color name="color_primary_glow">#4EDEA3</color>
+    <color name="color_primary_fixed">#6FFBBE</color>
+    <color name="color_primary_container">#10B981</color>
+    <color name="color_primary_alpha15">#2610B981</color>
+    <color name="color_primary_alpha30">#4D10B981</color>
+
+    <!-- 琥珀金预警色系 -->
+    <color name="color_tertiary">#F59E0B</color>
+    <color name="color_tertiary_glow">#FFB95F</color>
+    <color name="color_tertiary_alpha20">#33F59E0B</color>
+
+    <!-- 极光青流转色系 -->
+    <color name="color_cipher_cyan">#00F0FF</color>
+    <color name="color_cyan_teal">#06B6D4</color>
+
+    <!-- 错误阻断色 -->
+    <color name="color_error">#EF4444</color>
+
+    <!-- 边框与发丝微描边 -->
+    <color name="color_outline">#86948A</color>
+    <color name="color_outline_variant">#3C4A42</color>
+
+    <!-- 前景文本色彩 -->
+    <color name="text_on_surface">#E1E2EB</color>
+    <color name="text_on_surface_variant">#BBCABF</color>
+    <color name="text_outline">#86948A</color>
+    <color name="text_on_primary_fixed">#002113</color>
+</resources>

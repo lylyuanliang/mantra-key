@@ -1,0 +1,6 @@
+[package]
+name = "mantra-native-proxy"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

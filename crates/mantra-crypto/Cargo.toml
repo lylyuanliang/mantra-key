@@ -1,0 +1,13 @@
+[package]
+name = "mantra-crypto"
+version.workspace = true
+edition.workspace = true
+description = "MantraKey 密码学确定性派生引擎与安全内存隔离"
+
+[dependencies]
+argon2.workspace = true
+hkdf.workspace = true
+sha2.workspace = true
+zeroize.workspace = true
+thiserror.workspace = true
+subtle.workspace = true

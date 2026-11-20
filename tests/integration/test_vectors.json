@@ -1,0 +1,53 @@
+{
+  "version": "1.0.0",
+  "description": "MantraKey 跨平台金牌确定性测试向量库 (Cross-Platform Golden Test Vectors)",
+  "master_mantra": "CorrectHorseBatteryStaple2026!",
+  "salt": "mantra_key_salt_universal_2026",
+  "expected_sync_key_hex": "e613c352b59104ad6cd46ec8530a89c4ff951c065b4e24b62dc0a9986bbc04f8",
+  "test_cases": [
+    {
+      "id": "case_1_standard_web",
+      "name": "标准 Web 站点 - GitHub 认证页面",
+      "input_raw": "https://auth.github.com/login",
+      "expected_canonical_domain": "github.com",
+      "username": "octocat",
+      "version": 1,
+      "length": 16,
+      "charset_mask": 7,
+      "expected_password": "Ww^oxK+qvRTj%Yqq"
+    },
+    {
+      "id": "case_2_sso_group",
+      "name": "SSO 等价组 - Alipay 到 Taobao",
+      "input_raw": "alipay.com",
+      "expected_canonical_domain": "taobao.com",
+      "username": "merchant",
+      "version": 2,
+      "length": 18,
+      "charset_mask": 7,
+      "expected_password": "gbX}k:jvYe[^i2]fZz"
+    },
+    {
+      "id": "case_3_desktop_process",
+      "name": "桌面进程启发式 - Steam 客户端进程",
+      "input_raw": "Steam.exe",
+      "expected_canonical_domain": "steampowered.com",
+      "username": "gamer",
+      "version": 1,
+      "length": 20,
+      "charset_mask": 7,
+      "expected_password": "<z;KX4{?gvXSkZye%tVc"
+    },
+    {
+      "id": "case_4_android_package",
+      "name": "Android 银行顽固包名 - 招商银行掌上生活",
+      "input_raw": "com.cmbchina.ccd.pluto",
+      "expected_canonical_domain": "cmbchina.com",
+      "username": "cardholder",
+      "version": 1,
+      "length": 16,
+      "charset_mask": 7,
+      "expected_password": "f*&D*YSzLMJ8|N^c"
+    }
+  ]
+}

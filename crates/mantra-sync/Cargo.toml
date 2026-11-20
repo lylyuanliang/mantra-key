@@ -1,0 +1,11 @@
+[package]
+name = "mantra-sync"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mantra-crypto = { path = "../mantra-crypto" }
+aes-gcm.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

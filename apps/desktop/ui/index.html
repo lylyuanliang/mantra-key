@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>密诀 (MantraKey) - PC 桌面全局 HUD 唤起视窗 (Alt+K)</title>
+
+  <!-- 预连接与字体资源引入 (Inter + JetBrains Mono) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- 黑曜密符 (Obsidian Cipher) 设计系统样式表 -->
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- 1. 桌面背景模拟层 (宿主环境与壁纸) -->
+  <div class="desktop-backdrop"></div>
+  <div class="desktop-grid-lines"></div>
+
+  <!-- 2. 模拟前台运行的原生 Steam 登录客户端 (桌面目标宿主视窗) -->
+  <div class="host-app-preview" id="hostAppWindow">
+    <div class="host-app-header">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:16px;">🎮</span>
+        <span style="font-weight:600; font-size:12px; color:#C6D4DF;">Steam - Account Sign In</span>
+      </div>
+      <div style="display:flex; gap:8px; font-size:11px;">
+        <span>—</span>
+        <span>□</span>
+        <span>✕</span>
+      </div>
+    </div>
+    <div class="host-app-content">
+      <div style="color:#C6D4DF; font-weight:700; font-size:14px; text-transform:uppercase; letter-spacing:0.05em;">
+        Sign In with Account Name
+      </div>
+      <div style="width:100%; display:flex; flex-direction:column; gap:4px;">
+        <span style="color:#8F98A0; font-size:10px; font-family:var(--font-mono); text-transform:uppercase;">Account Name</span>
+        <div class="host-fake-input">steam_gamer_pro</div>
+      </div>
+      <div style="width:100%; display:flex; flex-direction:column; gap:4px;">
+        <span style="color:#8F98A0; font-size:10px; font-family:var(--font-mono); text-transform:uppercase;">Password</span>
+        <div class="host-fake-input" id="hostPasswordTarget" style="border-color: rgba(0, 240, 255, 0.4); justify-content:space-between;">
+          <span style="color:var(--cipher-cyan);" id="injectedDisplay">••••••••••••••••</span>
+          <span style="font-size:12px; color:var(--cipher-cyan);">🔒</span>
+        </div>
+      </div>
+      <div class="host-fake-button">Sign In</div>
+    </div>
+  </div>
+
+  <!-- 3. 全局常驻顶栏 (Shell Top Header) -->
+  <header class="vault-header">
+    <div style="display:flex; align-items:center; gap:16px;">
+      <div class="brand-badge">
+        <div class="brand-logo-icon">🔑</div>
+        <span>密诀 MantraKey</span>
+        <span class="version-pill">Tauri-v2.3</span>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <!-- 15 分钟会话锁状态胶囊徽标 -->
+      <div class="session-capsule" id="sessionCapsule" title="15分钟无操作自动销毁内存密钥">
+        <span class="status-dot active" id="sessionDot"></span>
+        <span>会话保持:</span>
+        <span class="font-mono" style="color:var(--cipher-cyan); font-weight:600;" id="sessionCountdown">14:58</span>
+      </div>
+
+      <button id="btnLockNow" class="btn-ghost-secondary" style="height:28px; padding:0 10px; font-size:11px;" title="立即物理清零注销会话">
+        <span>🔒 锁定</span>
+      </button>
+
+      <button id="btnToggleUnknownModal" class="btn-ghost-secondary" style="height:28px; padding:0 10px; font-size:11px; border-color:var(--border-warning); color:var(--status-warning);" title="模拟遇到未绑定进程拦截">
+        <span>⚡ 未知进程拦截</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- 4. LAYER 1: 中央 Obsidian Quick-HUD 浮层 (Screen 02 核心视窗) -->
+  <main class="hud-overlay" id="hudOverlay">
+    <div class="hud-panel" id="hudPanel">
+      <!-- 顶端微光翡翠/极光青发丝线 -->
+      <div class="hud-hairline-ray"></div>
+
+      <!-- HUD Header 进程感知栏 -->
+      <div class="hud-header">
+        <div class="hud-header-top">
+          <div class="process-target-chip">
+            <div class="target-icon-box">🎮</div>
+            <div class="target-text-group">
+              <span class="target-exe">steam.exe</span>
+              <span class="target-pid">PID: 8840</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button type="button" class="btn-hud-sync" id="btnOpenSyncModal" title="WebDAV 多端加密同步" style="background: rgba(0,240,255,0.1); border: 1px solid rgba(0,240,255,0.3); color: var(--cipher-cyan); font-size: 10px; border-radius: 4px; padding: 2px 8px; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+              <span>🌐</span>
+              <span>WebDAV 同步</span>
+            </button>
+            <div class="trigger-badge">
+              <span style="font-size:9px; color:var(--text-muted);">唤起:</span>
+              <kbd>Alt + K</kbd>
+            </div>
+          </div>
+        </div>
+
+        <div class="hud-meta-row">
+          <div class="domain-mapping-pill">
+            <span style="font-size:10px;">🌐</span>
+            <span>steampowered.com</span>
+            <span class="auto-mapped-tag">[Auto-Mapped]</span>
+          </div>
+          <div class="mlock-guard-badge">
+            <span>🛡️</span>
+            <span>mlock Guard Active</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 主口令与金丝雀防手抖安全输入区域 -->
+      <section class="hud-mantra-section">
+        <div class="mantra-label-row">
+          <span class="mantra-label-title">
+            <span>主口令心诀 (Master Mantra)</span>
+          </span>
+          <!-- 金丝雀实时安全呼吸指示灯 -->
+          <div class="canary-indicator" id="canaryIndicator" title="金丝雀防手抖哈希实时核验">
+            <span class="canary-dot" id="canaryDot"></span>
+            <span id="canaryText">金丝雀防手抖: 已就绪</span>
+          </div>
+        </div>
+
+        <div class="mantra-input-wrapper">
+          <span class="input-icon-left">🔑</span>
+          <input
+            type="password"
+            id="mantraInput"
+            class="mantra-input font-mono"
+            placeholder="键入您的主心诀口令以派生..."
+            value="MantraKey#Secret2026"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <div class="input-icon-right">
+            <button type="button" class="btn-toggle-visibility" id="btnToggleMantraVis" title="切换明密文预览">
+              <span id="visIcon">👁️</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 账号选择卡片流容器 (多账号快速切换) -->
+      <div class="hud-body-stream" id="accountList">
+        <!-- 账号卡片 1：默认高亮选中卡片 -->
+        <div class="credential-card selected" data-account="steam_gamer_pro" data-version="1" data-preset="Standard 16-char (v1)">
+          <div class="card-top-row">
+            <div class="card-user-info">
+              <div class="card-user-icon">👤</div>
+              <div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <span class="username-text">steam_gamer_pro</span>
+                  <span class="account-badge">主账号 (Primary)</span>
+                </div>
+              </div>
+            </div>
+            <div class="entropy-tag">
+              <span style="width:6px; height:6px; border-radius:50%; background:var(--cipher-cyan);"></span>
+              <span>128-bit Salted</span>
+            </div>
+          </div>
+
+          <!-- 版本步进器与规则说明 -->
+          <div class="card-version-row">
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span>版本步进:</span>
+              <div class="version-stepper">
+                <button type="button" class="btn-stepper btn-ver-down" title="回退版本">-</button>
+                <span class="stepper-val ver-display">v1</span>
+                <button type="button" class="btn-stepper btn-ver-up" title="升级版本">+</button>
+              </div>
+            </div>
+            <span style="font-size:10px; color:var(--text-muted);">Standard 16-char</span>
+          </div>
+
+          <!-- 掩码预览与哈希校验框 -->
+          <div class="mask-preview-box">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="color:var(--text-muted); font-size:12px;">🔒</span>
+              <span class="mask-code" id="cardPwdMask1">••••••••••••••••</span>
+            </div>
+            <div class="sha-preview">
+              <span>SHA256: 0x9f4a..c3</span>
+              <button type="button" class="btn-copy-mini btn-copy-card" title="复制派生结果">📋</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 账号卡片 2：次级账号卡片 -->
+        <div class="credential-card" data-account="smurf_trader_vault" data-version="2" data-preset="Super-Secure 24-char (v2)">
+          <div class="card-top-row">
+            <div class="card-user-info">
+              <div class="card-user-icon" style="background:rgba(255,255,255,0.06); color:var(--text-secondary);">👥</div>
+              <div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <span class="username-text">smurf_trader_vault</span>
+                  <span class="account-badge" style="background:rgba(255,255,255,0.08); border-color:var(--border-cipher); color:var(--text-secondary);">副账号 (Alt)</span>
+                </div>
+              </div>
+            </div>
+            <div class="entropy-tag">
+              <span>256-bit Salt</span>
+            </div>
+          </div>
+
+          <div class="card-version-row">
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span>版本步进:</span>
+              <div class="version-stepper">
+                <button type="button" class="btn-stepper btn-ver-down" title="回退版本">-</button>
+                <span class="stepper-val ver-display">v2</span>
+                <button type="button" class="btn-stepper btn-ver-up" title="升级版本">+</button>
+              </div>
+            </div>
+            <span style="font-size:10px; color:var(--text-muted);">Super-Secure 24-char</span>
+          </div>
+
+          <div class="mask-preview-box">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="color:var(--text-muted); font-size:12px;">🔑</span>
+              <span class="mask-code" style="color:var(--text-secondary);" id="cardPwdMask2">••••••••••••••••••••••••</span>
+            </div>
+            <div class="sha-preview">
+              <span>按 [2] 键切换</span>
+              <button type="button" class="btn-copy-mini btn-copy-card" title="复制派生结果">📋</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部操作栏 (Cyan 高亮主操作 + Ghost 次级操作) -->
+      <div class="hud-action-bar">
+        <button type="button" class="btn-primary-cyan" id="btnInject" title="回车直接通过 SendInput 仿真打入宿主窗口并隐退">
+          <kbd>↵ Enter</kbd>
+          <span>派生并键入 (SendInput)</span>
+          <span>⚡</span>
+        </button>
+
+        <button type="button" class="btn-ghost-secondary" id="btnCopyOnly" title="仅复制到系统剪贴板并在 30 秒后自动清零">
+          <kbd>Alt+C</kbd>
+          <span>仅复制密码</span>
+          <span>📋</span>
+        </button>
+      </div>
+
+      <!-- 底部快捷键与系统遥测提示条 -->
+      <footer class="hud-footer-bar">
+        <div class="telemetry-tag">
+          <span style="color:var(--cipher-cyan);">●</span>
+          <span>Windows SendInput Unicode Pipeline • 2ms 延迟 • 窗口失焦物理零化</span>
+        </div>
+        <div class="shortcut-tips">
+          <kbd>Alt+K</kbd> 唤起 · <kbd>Esc</kbd> 隐退 · 15分钟会话保护中
+        </div>
+      </footer>
+    </div>
+  </main>
+
+  <!-- 5. LAYER 2: 首次遇到未知进程绑定弹窗 (Unknown Process Binding Dialog) -->
+  <aside class="unknown-process-modal hidden" id="unknownProcessModal">
+    <div class="modal-amber-rail"></div>
+    <div class="modal-body">
+      <div style="display:flex; align-items:center; justify-content:space-between;">
+        <div class="modal-alert-tag">
+          <span>⚡</span>
+          <span>拦截到未知桌面进程: discord.exe (PID: 14208)</span>
+        </div>
+        <button type="button" id="btnCloseUnknownModal" style="background:transparent; border:none; color:var(--text-muted); cursor:pointer; font-size:14px;">✕</button>
+      </div>
+
+      <p class="modal-intro-text">
+        该进程尚未绑定归一化域名盐值。请为该应用程序指定目标 Web 域名，密诀将通过 Argon2id 确定性算法生成专属密码。
+      </p>
+
+      <!-- 域名模糊匹配搜索框 -->
+      <div class="field-group">
+        <label class="field-label">
+          <span>Target Domain Salt (主域名盐值)</span>
+          <span style="color:var(--cipher-cyan); font-size:10px;">模糊匹配智能推荐</span>
+        </label>
+        <div class="domain-search-box">
+          <span class="search-domain-icon">🌐</span>
+          <input type="text" id="domainSearchInput" class="domain-input" value="discord" placeholder="搜索或输入域名，如 discord.com..." />
+        </div>
+        <div class="autocomplete-dropdown" id="domainAutocomplete">
+          <div class="autocomplete-item">
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span style="color:var(--cipher-jade);">✓</span>
+              <span style="font-weight:700;">discord.com</span>
+              <span style="color:var(--text-secondary); font-size:10px;">(Discord 官方社区)</span>
+            </div>
+            <span style="background:rgba(0,240,255,0.2); padding:1px 5px; border-radius:2px; font-size:9px; text-transform:uppercase;">Suggested</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 规则模板单选组 -->
+      <div class="field-group">
+        <label class="field-label">
+          <span>Derivation Preset (派生强度规则)</span>
+        </label>
+        <div class="preset-selector-grid">
+          <div class="preset-card active" data-preset="standard_16">
+            <div class="preset-card-title">
+              <span>Standard (16-char)</span>
+              <span>●</span>
+            </div>
+            <span class="preset-card-desc">v1 • 大小写+数字+特殊符号</span>
+          </div>
+          <div class="preset-card" data-preset="super_32">
+            <div class="preset-card-title">
+              <span>Super-Secure (32-char)</span>
+              <span style="color:var(--text-muted);">○</span>
+            </div>
+            <span class="preset-card-desc">v2 • 全字符集高熵防爆破</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 动作按钮 -->
+      <div class="modal-actions">
+        <button type="button" class="btn-bind-derive" id="btnBindAndDerive">
+          <span>🔗 绑定并计算 (Bind & Derive)</span>
+        </button>
+        <button type="button" class="btn-ignore" id="btnIgnoreProcess">
+          <span>忽略此进程 (Ignore Process)</span>
+        </button>
+      </div>
+
+      <div style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono); display:flex; align-items:center; gap:6px; border-top:1px solid rgba(30,41,59,0.5); padding-top:8px;">
+        <span>🔒</span>
+        <span>绑定关系将加密写入本地元数据别名表，并通过端到端信封同步至全端设备。</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 6. LAYER 3: WebDAV 多端加密同步模态弹窗 (WebDAV E2EE Sync Modal) -->
+  <aside class="unknown-process-modal hidden" id="webdavSyncModal" style="max-width: 440px;">
+    <div class="modal-amber-rail" style="background: linear-gradient(90deg, #10b981 0%, #00f0ff 100%);"></div>
+    <div class="modal-body">
+      <div style="display:flex; align-items:center; justify-content:space-between;">
+        <div class="modal-alert-tag" style="background: rgba(0,240,255,0.12); color: var(--cipher-cyan); border-color: rgba(0,240,255,0.3);">
+          <span>🌐</span>
+          <span>WebDAV 端到端多端加密同步 (E2EE + CRDT)</span>
+        </div>
+        <button type="button" id="btnCloseSyncModal" style="background:transparent; border:none; color:var(--text-muted); cursor:pointer; font-size:14px;">✕</button>
+      </div>
+
+      <p class="modal-intro-text">
+        支持坚果云、Nextcloud、NAS 私有 WebDAV。本地通过主口令派生 AES-256-GCM 密钥加密，零知识多端同步。
+      </p>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.35); padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.06); margin-bottom: 10px;">
+        <span class="sync-tag" id="hudSyncStatusBadge" style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.08); color: var(--text-muted);">⚪ 尚未同步</span>
+        <span id="hudSyncTimeText" style="font-size: 10px; color: var(--text-dim);">上次同步: 未执行</span>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">WebDAV 服务器根地址</label>
+        <input type="text" id="hudWebdavUrl" class="domain-input font-mono" placeholder="例如: https://dav.jianguoyun.com/dav/" />
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-top: 8px;">
+        <div class="field-group" style="flex: 1;">
+          <label class="field-label">用户名 / 账号</label>
+          <input type="text" id="hudWebdavUser" class="domain-input font-mono" placeholder="账号" />
+        </div>
+        <div class="field-group" style="flex: 1;">
+          <label class="field-label">应用密码</label>
+          <input type="password" id="hudWebdavPass" class="domain-input font-mono" placeholder="应用独立密码" />
+        </div>
+      </div>
+
+      <div class="field-group" style="margin-top: 8px;">
+        <label class="field-label">远程密文文件名</label>
+        <input type="text" id="hudWebdavFile" class="domain-input font-mono" value="mantra_sync.mkey" />
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-top: 10px;">
+        <button type="button" id="btnHudTestSync" style="flex: 1; padding: 8px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: #fff; border-radius: 6px; font-size: 11px; cursor: pointer;">
+          ⚡ 测试连接
+        </button>
+        <button type="button" id="btnHudSaveSync" style="flex: 1; padding: 8px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: #fff; border-radius: 6px; font-size: 11px; cursor: pointer;">
+          💾 保存配置
+        </button>
+      </div>
+
+      <div style="margin-top: 10px;">
+        <button type="button" id="btnHudDoSync" style="width: 100%; padding: 10px; border-radius: 6px; background: linear-gradient(135deg, #10b981 0%, #00f0ff 100%); border: none; color: #0b0f17; font-size: 12px; font-weight: 700; cursor: pointer; box-shadow: 0 0 12px rgba(0, 240, 255, 0.3);">
+          🔄 立即双向同步 (CRDT 自愈合并)
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 7. HUD 全局通知浮层 (Toast) -->
+  <div class="hud-toast" id="hudToast">
+    <span id="toastIcon">⚡</span>
+    <span id="toastMsg">通知内容</span>
+  </div>
+
+  <!-- 7. 引入 HUD 交互控制脚本 -->
+  <script src="hud.js"></script>
+</body>
+</html>

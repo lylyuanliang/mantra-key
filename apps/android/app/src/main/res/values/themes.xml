@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 密诀基础主题 -->
+    <style name="Theme.MantraKey" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/color_primary</item>
+        <item name="colorPrimaryVariant">@color/color_primary_glow</item>
+        <item name="colorSecondary">@color/color_cyan_teal</item>
+        <item name="android:windowBackground">@color/bg_surface_lowest</item>
+        <item name="android:statusBarColor">@color/bg_surface_lowest</item>
+    </style>
+
+    <!-- 生物认证透明跳板 Activity 专用主题 -->
+    <style name="Theme.MantraKey.Transparent" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowAnimationStyle">@android:style/Animation.Translucent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
+</resources>

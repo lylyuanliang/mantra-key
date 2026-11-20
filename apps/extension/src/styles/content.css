@@ -1,0 +1,693 @@
+/**
+ * 密诀 MantraKey - Obsidian Cipher (黑曜密符) Screen 01 扩展样式表
+ * 严格遵照 UI/UX Spec 像素级还原
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+:root {
+  --mantra-bg-lowest: #0b0e14;
+  --mantra-bg-base: #10131a;
+  --mantra-bg-container: #1d2026;
+  --mantra-bg-high: #272a31;
+  --mantra-bg-card-active: #162232;
+  --mantra-border-hairline: rgba(38, 51, 77, 0.65);
+  --mantra-border-light: rgba(134, 148, 138, 0.25);
+  --mantra-primary: #10b981;
+  --mantra-primary-glow: #4edea3;
+  --mantra-tertiary: #f59e0b;
+  --mantra-tertiary-glow: #ffb95f;
+  --mantra-cyan: #00f0ff;
+  --mantra-text-main: #e1e2eb;
+  --mantra-text-muted: #86948a;
+  --mantra-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mantra-font-mono: 'JetBrains Mono', monospace;
+}
+
+/* 呼吸动画 */
+@keyframes mantra-pulse-emerald {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.8), 0 0 4px #10b981;
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(0.96);
+    box-shadow: 0 0 4px rgba(16, 185, 129, 0.4);
+  }
+}
+
+@keyframes mantra-pulse-amber {
+  0%, 100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 6px #f59e0b);
+  }
+  50% {
+    opacity: 0.6;
+    filter: drop-shadow(0 0 2px #f59e0b);
+  }
+}
+
+/* ========================================================== */
+/* 1. 密码输入框内置悬浮微标 (In-Input Badge)                  */
+/* ========================================================== */
+.mantra-input-wrapper {
+  position: relative !important;
+  display: inline-block !important;
+}
+
+.mantra-in-input-badge {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #10b981 0%, #00f0ff 100%);
+  color: #0b0e14;
+  border: 1px solid rgba(78, 222, 163, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+  user-select: none;
+  outline: none;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.mantra-in-input-badge:hover {
+  transform: translateY(-50%) scale(1.12);
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.85);
+}
+
+.mantra-in-input-badge svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  pointer-events: none;
+}
+
+/* ========================================================== */
+/* 2. 悬浮内嵌气泡卡片 (Floating In-Page Autofill Bubble)      */
+/* ========================================================== */
+.mantra-bubble-container {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 410px;
+  max-width: 95vw;
+  background: rgba(18, 24, 36, 0.94);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid #26334d;
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 24px rgba(16, 185, 129, 0.15);
+  z-index: 999999;
+  font-family: var(--mantra-font-sans);
+  color: var(--mantra-text-main);
+  box-sizing: border-box;
+  animation: mantra-fade-in 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes mantra-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.mantra-bubble-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(134, 148, 138, 0.2);
+}
+
+.mantra-bubble-domain-tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mantra-domain-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #10b981;
+}
+
+.mantra-domain-title {
+  font-family: var(--mantra-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: #e1e2eb;
+}
+
+.mantra-verified-tag {
+  font-size: 10px;
+  color: #10b981;
+  margin-left: 4px;
+}
+
+.mantra-session-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #1d2026;
+  border: 1px solid rgba(134, 148, 138, 0.3);
+  font-family: var(--mantra-font-mono);
+  font-size: 10px;
+  color: #10b981;
+}
+
+.mantra-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  animation: mantra-pulse-emerald 2s infinite;
+}
+
+.mantra-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 2px 4px 2px;
+}
+
+.mantra-action-label {
+  font-family: var(--mantra-font-mono);
+  font-size: 11px;
+  color: #86948a;
+}
+
+.mantra-force-inject-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #10b981;
+  font-family: var(--mantra-font-mono);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mantra-force-inject-btn:hover {
+  background: #10b981;
+  color: #0b0e14;
+}
+
+/* 账号卡片流 */
+.mantra-cards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.mantra-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(29, 32, 38, 0.8);
+  border: 1px solid rgba(134, 148, 138, 0.25);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.mantra-card:hover {
+  background: #1d2026;
+  border-color: rgba(134, 148, 138, 0.5);
+}
+
+.mantra-card.active {
+  background: #162232;
+  border-color: rgba(16, 185, 129, 0.7);
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.2);
+}
+
+.mantra-card-strip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+  background: #10b981;
+  box-shadow: 0 0 8px #4edea3;
+}
+
+.mantra-card-left {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-left: 6px;
+}
+
+.mantra-card-user-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mantra-card-username {
+  font-family: var(--mantra-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: #e1e2eb;
+}
+
+.mantra-card-badge {
+  font-family: var(--mantra-font-mono);
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+}
+
+.mantra-badge-primary {
+  background: rgba(16, 185, 129, 0.18);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.mantra-badge-enterprise {
+  background: rgba(30, 58, 138, 0.5);
+  color: #93c5fd;
+  border: 1px solid rgba(37, 99, 235, 0.4);
+}
+
+.mantra-card-sub-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mantra-rule-preset {
+  font-family: var(--mantra-font-mono);
+  font-size: 10px;
+  color: #86948a;
+  background: #1d2026;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid rgba(134, 148, 138, 0.2);
+}
+
+.mantra-mask-preview {
+  font-family: var(--mantra-font-mono);
+  font-size: 11px;
+  color: #10b981;
+  letter-spacing: 2px;
+}
+
+.mantra-card-right {
+  display: flex;
+  align-items: center;
+}
+
+/* 内嵌气泡就地解锁与快速录入表单 */
+.mantra-inline-unlock-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 2px 2px 2px;
+}
+
+.mantra-inline-unlock-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--mantra-font-mono);
+  font-size: 11px;
+}
+
+.mantra-inline-title {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.mantra-inline-canary {
+  color: #00f0ff;
+  background: rgba(0, 240, 255, 0.1);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.mantra-inline-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.mantra-bubble-input {
+  width: 100% !important;
+  box-sizing: border-box !important;
+  padding: 8px 34px 8px 10px !important;
+  background-color: #101622 !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 8px !important;
+  color: #f1f5f9 !important;
+  font-family: var(--mantra-font-mono) !important;
+  font-size: 12px !important;
+  line-height: 1.4 !important;
+  outline: none !important;
+  transition: all 0.15s ease !important;
+}
+
+.mantra-bubble-input:focus {
+  border-color: #00f0ff !important;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.25) !important;
+}
+
+.mantra-bubble-btn-eye {
+  position: absolute !important;
+  right: 6px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  background: transparent !important;
+  border: none !important;
+  color: #86948a !important;
+  cursor: pointer !important;
+  font-size: 13px !important;
+  padding: 4px !important;
+}
+
+.mantra-bubble-btn-unlock {
+  width: 100% !important;
+  padding: 8px !important;
+  border-radius: 8px !important;
+  background: linear-gradient(135deg, #10b981 0%, #00f0ff 100%) !important;
+  border: none !important;
+  color: #0b0f17 !important;
+  font-family: var(--mantra-font-sans) !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.3) !important;
+}
+
+.mantra-bubble-btn-unlock:hover {
+  filter: brightness(1.1) !important;
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.5) !important;
+}
+
+.mantra-shortcut-pill {
+  font-family: var(--mantra-font-mono);
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: #272a31;
+  color: #10b981;
+  border: 1px solid rgba(134, 148, 138, 0.3);
+  transition: all 0.15s ease;
+}
+
+.mantra-card:hover .mantra-shortcut-pill {
+  background: #10b981;
+  color: #0b0e14;
+}
+
+/* 底部遥测栏 */
+.mantra-bubble-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 8px;
+  margin-top: 6px;
+  border-top: 1px solid rgba(134, 148, 138, 0.2);
+  font-family: var(--mantra-font-mono);
+  font-size: 10px;
+  color: #86948a;
+}
+
+.mantra-telemetry-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mantra-telemetry-highlight {
+  color: #e1e2eb;
+}
+
+.mantra-telemetry-primary {
+  color: #10b981;
+  font-weight: 500;
+}
+
+/* ========================================================== */
+/* 3. 顶部悬浮改密安全确认横幅 (Floating Pending Commit Banner) */
+/* ========================================================== */
+.mantra-banner-backdrop {
+  position: fixed !important;
+  top: 16px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  width: 95% !important;
+  max-width: 820px !important;
+  z-index: 2147483647 !important;
+  pointer-events: auto !important;
+  font-family: var(--mantra-font-sans) !important;
+  animation: mantra-banner-slide-down 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+@keyframes mantra-banner-slide-down {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -20px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.mantra-banner-card {
+  border-radius: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.55);
+  background: rgba(22, 26, 34, 0.94);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  padding: 12px 18px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.85), 0 0 24px rgba(245, 158, 11, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: #e1e2eb;
+  box-sizing: border-box;
+}
+
+.mantra-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+}
+
+.mantra-amber-icon-box {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #f59e0b;
+  flex-shrink: 0;
+  animation: mantra-pulse-amber 1.8s ease-in-out infinite;
+}
+
+.mantra-amber-icon-box svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.mantra-banner-content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mantra-banner-header-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mantra-banner-title {
+  font-family: var(--mantra-font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: #f59e0b;
+  letter-spacing: -0.01em;
+}
+
+.mantra-banner-version-badge {
+  font-family: var(--mantra-font-mono);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.mantra-banner-desc {
+  font-size: 12px;
+  color: #bbcabf;
+  line-height: 1.4;
+  margin: 0;
+  max-width: 520px;
+}
+
+.mantra-banner-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.mantra-banner-btn-rollback {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: rgba(29, 32, 38, 0.6);
+  border: 1px solid rgba(134, 148, 138, 0.4);
+  color: #bbcabf;
+  font-family: var(--mantra-font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mantra-banner-btn-rollback:hover {
+  background: #272a31;
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.mantra-banner-btn-commit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  border-radius: 8px;
+  background: #10b981;
+  color: #0b0e14;
+  font-family: var(--mantra-font-sans);
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid rgba(78, 222, 163, 0.7);
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.4);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mantra-banner-btn-commit:hover {
+  background: #4edea3;
+  box-shadow: 0 0 24px rgba(16, 185, 129, 0.65);
+  transform: translateY(-1px);
+}
+
+/* ========================================================== */
+/* 4. 网页内高质感快捷控制台浮层 (In-Page Quick Modal - 方案 A) */
+/* ========================================================== */
+.mantra-quick-modal-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 2147483647 !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  align-items: flex-start !important;
+  padding: 16px 24px !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  font-family: var(--mantra-font-sans) !important;
+}
+
+.mantra-quick-modal-backdrop {
+  position: absolute !important;
+  inset: 0 !important;
+  background: rgba(4, 7, 13, 0.45) !important;
+  backdrop-filter: blur(4px) !important;
+  -webkit-backdrop-filter: blur(4px) !important;
+  pointer-events: auto !important;
+  opacity: 0 !important;
+  transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.mantra-quick-modal-card {
+  position: relative !important;
+  width: 384px !important;
+  max-width: calc(100vw - 32px) !important;
+  max-height: calc(100vh - 32px) !important;
+  background: #0b0f17 !important;
+  border: 1px solid rgba(0, 240, 255, 0.35) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 32px rgba(0, 240, 255, 0.18) !important;
+  overflow: hidden !important;
+  pointer-events: auto !important;
+  transform: translateY(-10px) scale(0.97) !important;
+  opacity: 0 !important;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.mantra-quick-modal-overlay.visible .mantra-quick-modal-backdrop {
+  opacity: 1 !important;
+}
+
+.mantra-quick-modal-overlay.visible .mantra-quick-modal-card {
+  transform: translateY(0) scale(1) !important;
+  opacity: 1 !important;
+}
+
+.mantra-quick-modal-iframe {
+  width: 100% !important;
+  min-height: 335px !important;
+  max-height: calc(100vh - 40px) !important;
+  border: none !important;
+  outline: none !important;
+  display: block !important;
+  background: #0b0f17 !important;
+  border-radius: 16px !important;
+  color-scheme: dark !important;
+  transition: height 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}

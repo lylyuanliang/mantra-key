@@ -1,0 +1,14 @@
+[package]
+name = "mantra-desktop"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mantra-crypto = { path = "../../../crates/mantra-crypto" }
+mantra-identity = { path = "../../../crates/mantra-identity" }
+mantra-sync = { path = "../../../crates/mantra-sync" }
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+zeroize = { workspace = true, features = ["derive"] }
+thiserror.workspace = true

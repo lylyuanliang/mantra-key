@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mantra-crypto",
+    "crates/mantra-identity",
+    "crates/mantra-sync",
+    "crates/mantra-plugin",
+    "crates/mantra-e2e",
+    "apps/native-proxy",
+    "apps/desktop/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["MantraKey Team"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+argon2 = { version = "0.5", default-features = false, features = ["alloc"] }
+hkdf = "0.12"
+sha2 = "0.10"
+aes-gcm = "0.10"
+zeroize = { version = "1.8", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.38", features = ["full"] }
+thiserror = "1.0"
+subtle = "2.5"
