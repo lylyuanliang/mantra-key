@@ -3,7 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "build:all": "python scripts/build_all.py",
     "build:extension": "pnpm --filter @mantra-key/extension build",
+    "zip:extension": "pnpm --filter @mantra-key/extension zip",
+    "build:desktop": "cargo build --release --bin mantra-desktop --bin mantra-native-proxy",
+    "build:android": "pwsh -File scripts/build_android.ps1 -NoPause",
     "dev:extension": "pnpm --filter @mantra-key/extension dev",
     "dev:android": "pnpm --filter @mantra-key/android-web dev",
     "sentinel": "agent-feedback watch --dir scratch/feedback",
