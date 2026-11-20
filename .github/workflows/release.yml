@@ -1,0 +1,290 @@
+name: Build and Release MantraKey Multi-Client
+
+'on':
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '发布版本 Tag（留空则自动提取自 releases/version.json）'
+        required: false
+        default: ''
+
+jobs:
+  # =========================================================================
+  # 阶段 1：构建 Chrome MV3 浏览器扩展 (Google Chrome Web Store 规范标准)
+  # =========================================================================
+  build-extension:
+    name: Build Chrome Extension (MV3)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Run Extension Unit Tests
+        run: pnpm --filter @mantra-key/extension test
+
+      - name: Build and Package Extension
+        run: |
+          pnpm --filter @mantra-key/extension build
+          pnpm --filter @mantra-key/extension zip
+
+      - name: Verify Web Store Zip Structure
+        run: |
+          ZIP_FILE=$(find apps/extension/.output -name "*.zip" | head -n 1)
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: Extension ZIP not found!"
+            exit 1
+          fi
+          echo "Found Extension Zip: $ZIP_FILE"
+          unzip -l "$ZIP_FILE" | grep "manifest.json" || {
+            echo "ERROR: manifest.json missing from root of ZIP!"
+            exit 1
+          }
+          unzip -l "$ZIP_FILE" | grep "icons/icon-128.png" || {
+            echo "ERROR: icons/icon-128.png missing!"
+            exit 1
+          }
+          mkdir -p dist-extension
+          cp "$ZIP_FILE" dist-extension/chrome-extension.zip
+
+      - name: Upload Extension Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-artifact
+          path: dist-extension/chrome-extension.zip
+          retention-days: 1
+
+  # =========================================================================
+  # 阶段 2：构建 Windows 桌面中枢与 Native 消息代理桩 (Windows x64)
+  # =========================================================================
+  build-desktop:
+    name: Build Windows Desktop & Proxy
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Rust Stable Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Workspace Tests
+        run: cargo test --workspace
+
+      - name: Compile Release Binaries
+        run: cargo build --release --bin mantra-desktop --bin mantra-native-proxy
+
+      - name: Package Windows Desktop Bundle
+        run: |
+          python scripts/package_desktop.py --desktop target/release/mantra-desktop.exe --proxy target/release/mantra-native-proxy.exe --output dist-desktop/desktop-windows-x64.zip
+
+      - name: Upload Desktop Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-artifact
+          path: dist-desktop/desktop-windows-x64.zip
+          retention-days: 1
+
+  # =========================================================================
+  # 阶段 3：构建 Android 移动端双变体 (Release & Debug APK)
+  # =========================================================================
+  build-android:
+    name: Build Android Dual APKs
+    runs-on: ubuntu-latest
+
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Configure Android SDK & Install Platform 34
+        run: |
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+          sudo chown -R $USER:$USER $ANDROID_SDK_ROOT
+          yes | sdkmanager --licenses || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+
+      - name: Setup Gradle Cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-disabled: true
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x apps/android/gradlew
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      # 3.1 构建正式发布版 APK (Zero-DCE)
+      - name: Build Web Assets (Release)
+        run: pnpm --filter @mantra-key/android-web run build:release
+
+      - name: Compile Android Release APK
+        working-directory: apps/android
+        run: ./gradlew clean assembleRelease --no-daemon --stacktrace
+
+      - name: Verify Release APK
+        run: |
+          APK="apps/android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK" || { echo "Release APK missing!"; exit 1; }
+          mkdir -p dist-android
+          cp "$APK" dist-android/app-release.apk
+
+      # 3.2 构建调试内测版 APK (挂载 Agent Feedback)
+      - name: Build Web Assets (Debug)
+        run: pnpm --filter @mantra-key/android-web run build
+
+      - name: Compile Android Debug APK
+        working-directory: apps/android
+        run: ./gradlew clean assembleDebug --no-daemon --stacktrace
+
+      - name: Verify Debug APK
+        run: |
+          APK="apps/android/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK" || { echo "Debug APK missing!"; exit 1; }
+          cp "$APK" dist-android/app-debug.apk
+
+      - name: Upload Android Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-artifact
+          path: dist-android/
+          retention-days: 1
+
+  # =========================================================================
+  # 阶段 4：汇总全端产物、计算 SHA-256 指纹、生成发版说明并发布 GitHub Release
+  # =========================================================================
+  publish-release:
+    name: Publish Multi-Client Release
+    needs: [build-extension, build-desktop, build-android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Resolve Version and Tag
+        id: resolve_version
+        run: |
+          if [ -n "${{ inputs.tag_name }}" ]; then
+            TAG="${{ inputs.tag_name }}"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG=$(node -p "require('./releases/version.json').versionTag || ('v' + require('./releases/version.json').version)")
+          fi
+          echo "Resolved Tag: $TAG"
+          echo "TAG=$TAG" >> $GITHUB_ENV
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Download Extension Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: extension-artifact
+          path: artifacts/extension
+
+      - name: Download Desktop Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-artifact
+          path: artifacts/desktop
+
+      - name: Download Android Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: android-artifact
+          path: artifacts/android
+
+      - name: Aggregate & Rename All Release Artifacts
+        id: aggregate
+        run: |
+          mkdir -p release-assets
+          EXT_NAME="mantra-key-chrome-extension-${{ env.TAG }}.zip"
+          DESK_NAME="mantra-key-desktop-${{ env.TAG }}-windows-x64.zip"
+          APK_REL_NAME="mantra-key-${{ env.TAG }}-release.apk"
+          APK_DBG_NAME="mantra-key-${{ env.TAG }}-debug.apk"
+
+          cp artifacts/extension/chrome-extension.zip "release-assets/$EXT_NAME"
+          cp artifacts/desktop/desktop-windows-x64.zip "release-assets/$DESK_NAME"
+          cp artifacts/android/app-release.apk "release-assets/$APK_REL_NAME"
+          cp artifacts/android/app-debug.apk "release-assets/$APK_DBG_NAME"
+
+          echo "=== Artifacts in release-assets ==="
+          ls -lh release-assets
+
+          cd release-assets
+          sha256sum "$EXT_NAME" "$DESK_NAME" "$APK_REL_NAME" "$APK_DBG_NAME" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          cd ..
+
+      - name: Generate Release Notes
+        id: release_notes
+        run: |
+          python scripts/generate_release_notes.py --artifacts-dir release-assets --output release_notes.md --tag "${{ env.TAG }}"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 密诀 MantraKey ${{ env.TAG }} 全端正式发布版
+          tag_name: ${{ env.TAG }}
+          body_path: release_notes.md
+          files: |
+            release-assets/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(env.TAG, '-') }}
+          token: ${{ secrets.GITHUB_TOKEN }}
