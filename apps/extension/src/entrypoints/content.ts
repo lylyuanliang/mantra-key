@@ -1122,7 +1122,7 @@ export default defineContentScript({
           openQuickModal();
         }
         sendResponse({ status: 'ok' });
-        return true;
+        return false;
       }
       if (msg.action === 'AUTOFILL_CREDENTIALS') {
         const success = autofillPageCredentials(msg.username, msg.password);
@@ -1131,7 +1131,7 @@ export default defineContentScript({
           closeQuickModal();
         }
         sendResponse({ success });
-        return true;
+        return false;
       }
       return false;
     });

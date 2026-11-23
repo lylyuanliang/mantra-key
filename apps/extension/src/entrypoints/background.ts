@@ -39,11 +39,20 @@ export default defineBackground(() => {
   const pendingRequests = new Map<string, (res: ResponseEnvelope) => void>();
 
   /**
-   * 建立 Native Messaging 原生连接 (如果宿主机器安装了桌面端守护代理)
+   * 建立 Native Messaging 原生连接 (按需懒加载，避免未安装本地服务时启动报错)
    */
   function connectToNativeDaemon(): void {
+    if (nativePort) return;
     try {
       nativePort = chrome.runtime.connectNative('org.mantrakey.native_proxy');
+
+      nativePort.onDisconnect.addListener(() => {
+        // 关键防护：必须读取并消费 chrome.runtime.lastError，通知 Chrome 运行时错误已受控处理，避免扩展管理页亮起红色“错误”按钮
+        const _handledError = chrome.runtime.lastError;
+        heartbeatManager?.stop();
+        heartbeatManager = null;
+        nativePort = null;
+      });
 
       // 初始化 25 秒 PING/PONG 心跳管理器，防 Service Worker 冻结
       heartbeatManager = new HeartbeatManager(nativePort, 25000);
@@ -66,14 +75,6 @@ export default defineBackground(() => {
           pendingRequests.delete(response.id);
           callback?.(response);
         }
-      });
-
-      nativePort.onDisconnect.addListener(() => {
-        // 关键防护：必须读取 chrome.runtime.lastError，通知 Chrome 运行时错误已受控处理，避免扩展管理页亮起红色“错误”按钮
-        const _handledError = chrome.runtime.lastError;
-        heartbeatManager?.stop();
-        heartbeatManager = null;
-        nativePort = null;
       });
     } catch {
       nativePort = null;
@@ -405,22 +406,22 @@ export default defineBackground(() => {
     // 9. 一键填充到当前激活网页
     if (action === 'AUTOFILL_ACTIVE_TAB') {
       chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
-        if (tab?.id) {
-          chrome.tabs.sendMessage(tab.id, {
-            action: 'AUTOFILL_CREDENTIALS',
-            username: payload?.username,
-            password: payload?.password,
-          }, (res) => {
-            const err = chrome.runtime.lastError;
-            if (err) {
-              sendResponse({ status: 'error', message: '网页未载入填充脚本或为受保护页面' });
-            } else {
-              sendResponse({ status: 'ok', res });
-            }
-          });
-        } else {
-          sendResponse({ status: 'error', message: '未找到激活的网页' });
+        if (!tab?.id || !tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('edge://') || tab.url.startsWith('about:') || tab.url.startsWith('chrome-extension://')) {
+          sendResponse({ status: 'error', message: '当前为内部或受保护页面，无法注入填充' });
+          return;
         }
+        chrome.tabs.sendMessage(tab.id, {
+          action: 'AUTOFILL_CREDENTIALS',
+          username: payload?.username,
+          password: payload?.password,
+        }, (res) => {
+          const err = chrome.runtime.lastError;
+          if (err) {
+            sendResponse({ status: 'error', message: '网页尚未载入填充脚本或为受保护页面' });
+          } else {
+            sendResponse({ status: 'ok', res });
+          }
+        });
       }).catch((err) => {
         sendResponse({ status: 'error', message: err?.message });
       });
@@ -462,7 +463,4 @@ export default defineBackground(() => {
 
     return false;
   });
-
-  // 尝试连接本地原生代理桩
-  connectToNativeDaemon();
 });
