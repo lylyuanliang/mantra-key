@@ -38,6 +38,10 @@
 2. 将其解压到一个您日常存放常用工具的**固定目录**（例如：`D:\Tools\MantraKey` 或 `C:\Tools\MantraKey`）；
 > ⚠️ **注意**：请不要解压在“系统临时目录”或随时会被清理的“下载文件夹”中，因为后续自动更新时，Native 代理会在该目录下原地直接热覆盖。
 
+<div align="center">
+  <img src="assets/extension_preview.png" width="360" alt="密诀 Chrome MV3 扩展主面板" />
+</div>
+
 #### 步骤 2：在浏览器中加载扩展程序
 1. 打开 Chrome 浏览器，在地址栏输入 `chrome://extensions` 并按回车（Edge 浏览器输入 `edge://extensions`）；
 2. 打开页面右上角的 **「开发者模式」** 开关；
@@ -63,6 +67,10 @@
 ---
 
 ### 2. Android 移动端（双引擎穿透）
+
+<div align="center">
+  <img src="assets/android_preview.jpg" width="300" alt="Android 移动端控制台" />
+</div>
 
 #### 步骤 1：安装 APK
 从 Releases 下载 `mantra-key-v0.1.0-release.apk`，在手机上允许安装未知应用并完成安装。
@@ -118,6 +126,10 @@
 
 ### 3. 站点自定义别名与多域名关联
 
+<div align="center">
+  <img src="assets/manifest_preview.png" width="360" alt="站点别名与多域名关联" />
+</div>
+
 很多时候，一个账号会对应多个域名，或者域名本身很长不好记（例如 `dash.cdn-fly.xyz`）：
 1. 点击面板顶部的 **「📋 记录清单」**，查看所有已存的站点；
 2. **设置易记别名**：点击站点名称右侧的 ✏️（小铅笔）图标，即可随时重命名（例如改成 `三毛机场`、`公司内网堡垒机`）；
@@ -142,6 +154,10 @@
 密诀的云同步**绝不上报任何中心化商业服务器**，只支持标准的 **去中心化 WebDAV 协议**。您可以将其免费挂载在**坚果云、Nextcloud、群晖/威联通 NAS、自建 WebDAV 容器**上。
 
 ### 1. 云端同步配置方法（以坚果云为例）
+
+<div align="center">
+  <img src="assets/webdav_sync.png" width="380" alt="WebDAV 云端同步" />
+</div>
 
 1. 注册并登录坚果云，在「账户信息」->「安全选项」中找到“第三方应用管理”；
 2. 添加一个应用密码，名称填 `MantraKey`，生成专用的应用授权密码；

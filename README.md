@@ -70,12 +70,15 @@
 
 ### 3. Chrome MV3 原生沉浸式扩展 (WXT 驱动)
 <div align="center">
-  <img src="docs/assets/extension_preview.png" width="410" alt="Chrome MV3 扩展原生弹窗" />
+  <img src="docs/assets/extension_preview.png" width="380" alt="Chrome MV3 扩展原生弹窗" />
+  &nbsp;&nbsp;
+  <img src="docs/assets/manifest_preview.png" width="380" alt="全部已存站点与账号清单" />
 </div>
 
 - **纯正原生 Action Popup**：极致组件化倒角体系与 `#0b0f17` Obsidian 暗夜配色，杜绝白边闪烁与页面跳出；
-- **自适应 Header 状态栏**：未解锁时展示紧凑的 `🔴 已锁定` 与 `🌐 同步`，解锁后动态展开 `[青点] 指纹`、`[绿点] 14:59 倒计时`、`🌐 同步` 与 `锁定`，文字严格单行对齐不折行；
-- **智能域名与多账号管理**：自动识别当前网页顶级域名与 Punycode 中文域名，支持一键切换账号身份与一键秒级填充。
+- **自适应 Header 状态栏**：未解锁时展示紧凑的 `🔴 待输入` 与 `🌐 同步`，输入口令后展示实时计算的 `8位金丝雀防敲错指纹` 与 15 分钟会话守卫；
+- **智能域名、别名与关联池**：支持通过 ✏️ 别名设置通俗名称（如将 `dash.xxx.com` 设为 `三毛机场`），支持「🔗 关联当前网页」将多域名镜像收拢至同一账号；
+- **在线静默热重载升级**：内置 Native 代理一键更新服务，点击「⚡ 一键更新」原地自动热升级。
 
 ### 4. Android 双引擎：系统级填充 + 辅助穿透输入法 (PenetrationIME)
 <div align="center">
