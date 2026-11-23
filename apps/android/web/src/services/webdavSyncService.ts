@@ -397,6 +397,85 @@ export async function unpackE2EEEnvelope(envelope: Uint8Array, syncPassword?: st
   return res.manifest;
 }
 
+interface SafeFetchResponse {
+  status: number;
+  statusText: string;
+  ok: boolean;
+  headers: Headers;
+  arrayBuffer: () => Promise<ArrayBuffer>;
+  text: () => Promise<string>;
+  json: () => Promise<any>;
+}
+
+/**
+ * 跨端安全 Fetch 网关：
+ * 自动识别 Android 原生注入的 MantraNative.nativeHttpRequest 桥梁；
+ * 若在 Android 客户端环境运行，通过原生系统网络穿透请求，100% 免疫 Chromium WebView 的 CORS 跨域限制与 Origin 拦截！
+ * 若在标准浏览器环境运行，平滑回退至标准 window.fetch。
+ */
+export async function safeFetch(url: string, init?: RequestInit): Promise<Response | SafeFetchResponse> {
+  const native = (window as any).MantraNative || (window as any).AlpineNative;
+  if (native && typeof native.nativeHttpRequest === 'function') {
+    let bodyBase64 = '';
+    if (init?.body) {
+      if (init.body instanceof Uint8Array || init.body instanceof ArrayBuffer) {
+        const u8 = init.body instanceof Uint8Array ? init.body : new Uint8Array(init.body);
+        let binary = '';
+        for (let i = 0; i < u8.length; i++) {
+          binary += String.fromCharCode(u8[i]);
+        }
+        bodyBase64 = btoa(binary);
+      } else if (typeof init.body === 'string') {
+        bodyBase64 = btoa(unescape(encodeURIComponent(init.body)));
+      }
+    }
+
+    const headersObj: Record<string, string> = {};
+    if (init?.headers) {
+      if (init.headers instanceof Headers) {
+        init.headers.forEach((v, k) => { headersObj[k] = v; });
+      } else if (Array.isArray(init.headers)) {
+        init.headers.forEach(([k, v]) => { headersObj[k] = v; });
+      } else {
+        Object.assign(headersObj, init.headers);
+      }
+    }
+
+    const reqPayload = {
+      url,
+      method: (init?.method || 'GET').toUpperCase(),
+      headers: headersObj,
+      bodyBase64,
+      timeoutMs: 15000
+    };
+
+    const rawResp = native.nativeHttpRequest(JSON.stringify(reqPayload));
+    const parsed = JSON.parse(rawResp);
+
+    if (parsed.status === 0 && !parsed.ok) {
+      throw new TypeError(`Failed to fetch (原生网络穿透代理异常: ${parsed.error || 'Connection Failed'})`);
+    }
+
+    const byteStr = parsed.bodyBase64 ? atob(parsed.bodyBase64) : '';
+    const bytes = new Uint8Array(byteStr.length);
+    for (let i = 0; i < byteStr.length; i++) {
+      bytes[i] = byteStr.charCodeAt(i);
+    }
+
+    return {
+      status: parsed.status,
+      statusText: parsed.statusText,
+      ok: parsed.ok,
+      headers: new Headers(parsed.headers || {}),
+      arrayBuffer: async () => bytes.buffer,
+      text: async () => new TextDecoder().decode(bytes),
+      json: async () => JSON.parse(new TextDecoder().decode(bytes))
+    } as SafeFetchResponse;
+  }
+
+  return fetch(url, init);
+}
+
 /**
  * 测试 WebDAV 连通性
  */
@@ -409,7 +488,7 @@ export async function testWebDAVConnection(config: WebDAVConfig): Promise<{ ok: 
 
   try {
     // 尝试向目标地址发送 PROPFIND 或 GET 请求
-    const res = await fetch(url + '/', {
+    const res = await safeFetch(url + '/', {
       method: 'PROPFIND',
       headers: {
         'Authorization': authHeader,
@@ -419,7 +498,7 @@ export async function testWebDAVConnection(config: WebDAVConfig): Promise<{ ok: 
       signal: AbortSignal.timeout(6000)
     }).catch(async () => {
       // 部分 WebDAV 服务器禁用了 PROPFIND，回退至 GET
-      return fetch(url + '/', {
+      return safeFetch(url + '/', {
         method: 'GET',
         headers: { 'Authorization': authHeader },
         signal: AbortSignal.timeout(6000)
@@ -463,7 +542,7 @@ export async function performWebDAVSync(
 
   // 1. 尝试从 WebDAV 下载现有远程文件
   try {
-    const getRes = await fetch(remoteFileUrl, {
+    const getRes = await safeFetch(remoteFileUrl, {
       method: 'GET',
       headers: { 'Authorization': authHeader },
       signal: AbortSignal.timeout(8000)
@@ -529,7 +608,7 @@ export async function performWebDAVSync(
 
   // 5. 将新数据 PUT 上传至 WebDAV 服务器
   try {
-    const putRes = await fetch(remoteFileUrl, {
+    const putRes = await safeFetch(remoteFileUrl, {
       method: 'PUT',
       headers: {
         'Authorization': authHeader,

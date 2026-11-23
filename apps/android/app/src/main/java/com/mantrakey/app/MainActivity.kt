@@ -601,6 +601,128 @@ class MainActivity : AppCompatActivity() {
                 }
             }.start()
         }
+
+        private fun setRequestMethodSafely(conn: HttpURLConnection, method: String) {
+            try {
+                conn.requestMethod = method
+            } catch (e: java.net.ProtocolException) {
+                try {
+                    var current: Class<*>? = conn.javaClass
+                    while (current != null && current != Any::class.java) {
+                        try {
+                            val methodField = current.getDeclaredField("method")
+                            methodField.isAccessible = true
+                            methodField.set(conn, method)
+                            break
+                        } catch (_: NoSuchFieldException) {
+                            current = current.superclass
+                        }
+                    }
+                    val delegateField = conn.javaClass.declaredFields.find { it.name == "delegate" }
+                    if (delegateField != null) {
+                        delegateField.isAccessible = true
+                        val delegate = delegateField.get(conn)
+                        if (delegate != null) {
+                            var delClass: Class<*>? = delegate.javaClass
+                            while (delClass != null && delClass != Any::class.java) {
+                                try {
+                                    val methodField = delClass.getDeclaredField("method")
+                                    methodField.isAccessible = true
+                                    methodField.set(delegate, method)
+                                    break
+                                } catch (_: NoSuchFieldException) {
+                                    delClass = delClass.superclass
+                                }
+                            }
+                        }
+                    }
+                } catch (ignored: Exception) {
+                    Log.w(TAG, "设置自定义 HTTP 方法 $method 失败: ${ignored.message}")
+                }
+            }
+        }
+
+        /**
+         * 原生网络请求穿透网关：彻底解决 WebView 内访问 WebDAV (如坚果云/NAS) 的 CORS 跨域限制
+         * 在 JavaBridge 后台线程中执行阻塞式 I/O，不阻塞 UI 线程
+         */
+        @JavascriptInterface
+        fun nativeHttpRequest(requestJson: String): String {
+            val respObj = org.json.JSONObject()
+            var conn: HttpURLConnection? = null
+            try {
+                val req = org.json.JSONObject(requestJson)
+                val urlStr = req.getString("url")
+                val method = req.optString("method", "GET").uppercase()
+                val headers = req.optJSONObject("headers")
+                val bodyBase64 = if (req.has("bodyBase64") && !req.isNull("bodyBase64")) req.getString("bodyBase64") else ""
+                val timeoutMs = req.optInt("timeoutMs", 15000)
+
+                val url = URL(urlStr)
+                conn = (url.openConnection() as HttpURLConnection).apply {
+                    connectTimeout = timeoutMs
+                    readTimeout = timeoutMs
+                    instanceFollowRedirects = true
+                    useCaches = false
+                }
+
+                setRequestMethodSafely(conn, method)
+
+                // 写入自定义请求头
+                if (headers != null) {
+                    val keys = headers.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        conn.setRequestProperty(key, headers.getString(key))
+                    }
+                }
+
+                // 写入请求体 (PUT/POST)
+                if (!bodyBase64.isNullOrEmpty()) {
+                    conn.doOutput = true
+                    val bodyBytes = android.util.Base64.decode(bodyBase64, android.util.Base64.NO_WRAP)
+                    conn.outputStream.use { os ->
+                        os.write(bodyBytes)
+                        os.flush()
+                    }
+                }
+
+                val statusCode = conn.responseCode
+                val statusMessage = conn.responseMessage ?: ""
+
+                val inputStream = if (statusCode in 200..399) {
+                    conn.inputStream
+                } else {
+                    conn.errorStream ?: conn.inputStream
+                }
+
+                val respBytes = inputStream?.use { it.readBytes() } ?: ByteArray(0)
+                val respBase64 = android.util.Base64.encodeToString(respBytes, android.util.Base64.NO_WRAP)
+
+                respObj.put("status", statusCode)
+                respObj.put("statusText", statusMessage)
+                respObj.put("ok", statusCode in 200..299 || statusCode == 207)
+                respObj.put("bodyBase64", respBase64)
+
+                val respHeaders = org.json.JSONObject()
+                for ((k, v) in conn.headerFields) {
+                    if (k != null && v.isNotEmpty()) {
+                        respHeaders.put(k.lowercase(), v.joinToString(", "))
+                    }
+                }
+                respObj.put("headers", respHeaders)
+            } catch (e: Exception) {
+                Log.w(TAG, "Native HTTP request failed: ${e.message}", e)
+                respObj.put("status", 0)
+                respObj.put("statusText", "Error")
+                respObj.put("ok", false)
+                respObj.put("error", e.message ?: "网络请求失败")
+                respObj.put("bodyBase64", "")
+            } finally {
+                conn?.disconnect()
+            }
+            return respObj.toString()
+        }
     }
 
     private lateinit var assetLoader: WebViewAssetLoader
