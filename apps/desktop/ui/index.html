@@ -358,7 +358,7 @@
       </div>
 
       <p class="modal-intro-text">
-        支持坚果云、Nextcloud、NAS 私有 WebDAV。本地通过主口令派生 AES-256-GCM 密钥加密，零知识多端同步。
+        支持坚果云、Nextcloud、NAS 私有 WebDAV。支持独立同步加密密码，零知识端到端金融级加密与多端无锁合并。
       </p>
 
       <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.35); padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.06); margin-bottom: 10px;">
@@ -368,7 +368,7 @@
 
       <div class="field-group">
         <label class="field-label">WebDAV 服务器根地址</label>
-        <input type="text" id="hudWebdavUrl" class="domain-input font-mono" placeholder="例如: https://dav.jianguoyun.com/dav/" />
+        <input type="text" id="hudWebdavUrl" class="domain-input font-mono" placeholder="例如: https://dav.jianguoyun.com/dav/mantra-key" />
       </div>
 
       <div style="display: flex; gap: 8px; margin-top: 8px;">
@@ -383,8 +383,13 @@
       </div>
 
       <div class="field-group" style="margin-top: 8px;">
-        <label class="field-label">远程密文文件名</label>
+        <label class="field-label">远程文件名</label>
         <input type="text" id="hudWebdavFile" class="domain-input font-mono" value="mantra_sync.mkey" />
+      </div>
+
+      <div class="field-group" style="margin-top: 8px;">
+        <label class="field-label">同步加密密码 (可选端到端 E2EE，留空存明文)</label>
+        <input type="password" id="hudWebdavSyncPass" class="domain-input font-mono" placeholder="可留空，或输入专属同步加密密码..." />
       </div>
 
       <div style="display: flex; gap: 8px; margin-top: 10px;">

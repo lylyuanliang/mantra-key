@@ -157,7 +157,7 @@ function mountApp() {
                   type="text"
                   id="input-webdav-url"
                   class="cyber-input"
-                  placeholder="例如: https://dav.jianguoyun.com/dav/"
+                  placeholder="例如: https://dav.jianguoyun.com/dav/mantra-key"
                   value=""
                 />
               </div>
@@ -197,6 +197,23 @@ function mountApp() {
                 />
               </div>
 
+              <div class="input-group">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <label class="input-label" for="input-webdav-sync-pass">同步加密密码 (可选端到端 E2EE)</label>
+                  <span style="font-size: 11px; color: var(--text-dim);">留空存明文 · 填写享金融级加密</span>
+                </div>
+                <div class="input-with-action">
+                  <input
+                    type="password"
+                    id="input-webdav-sync-pass"
+                    class="cyber-input"
+                    placeholder="可留空，或输入独立同步密码..."
+                    value=""
+                  />
+                  <button type="button" class="btn-toggle-visibility" id="btn-toggle-sync-pass" title="显隐密码">🙈</button>
+                </div>
+              </div>
+
               <div class="sync-actions-row">
                 <button type="button" class="btn-secondary" id="btn-test-webdav">
                   ⚡ 测试连通性
@@ -207,7 +224,7 @@ function mountApp() {
               </div>
 
               <div class="sync-hint-box">
-                💡 <strong>零知识加密保障：</strong>同步前在本地使用您的主口令派生高强密钥，WebDAV 云端仅保存 <code>.mkey</code> 二进制密文，坚果云或 Nextcloud 管理员无法逆向出您的任何站点信息。
+                💡 <strong>独立同步加密保障：</strong>支持设置独立同步加密密码。若填写，清单在本地使用 AES-256-GCM 强加密后再上传至云端；若留空，则以明文信封存储。多端支持无缝平滑自适应合并与升格。
               </div>
             </div>
 
@@ -333,6 +350,32 @@ function mountApp() {
             <button type="button" class="btn-confirm-onboarding" id="btn-confirm-onboarding">
               ✅ 我已知晓，开启安全体验
             </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 就地同步加密密码输入弹窗 (当检测到云端加密而本地未配置时触发) -->
+      <div id="sync-pass-modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 10000; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
+        <div style="background: #111827; border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 12px; padding: 20px; width: 90%; max-width: 380px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+            <span style="font-size: 20px;">🔐</span>
+            <h3 style="margin: 0; font-size: 16px; color: #fff; font-weight: 600;">云端数据已加密</h3>
+          </div>
+          <p style="font-size: 13px; color: #94a3b8; line-height: 1.5; margin-bottom: 16px;">
+            检测到 WebDAV 云端备份已启用端到端加密（0x01 密文信封），请输入同步加密密码以完成数据解密与双向合并：
+          </p>
+          <div class="input-group" style="margin-bottom: 20px;">
+            <input
+              type="password"
+              id="modal-sync-pass-input"
+              class="cyber-input"
+              placeholder="输入此云端备份的同步加密密码..."
+              style="width: 100%; box-sizing: border-box;"
+            />
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button type="button" class="btn-secondary" id="btn-modal-sync-cancel" style="padding: 8px 16px; font-size: 13px;">取消</button>
+            <button type="button" class="btn-primary" id="btn-modal-sync-confirm" style="padding: 8px 18px; font-size: 13px; background: linear-gradient(135deg, #10b981 0%, #00f0ff 100%); color: #0b0f17; font-weight: 600; border: none; border-radius: 6px;">确认解密并保存</button>
           </div>
         </div>
       </div>
@@ -547,6 +590,8 @@ function setupWebDAVSync() {
   const inputUser = document.getElementById('input-webdav-user') as HTMLInputElement | null;
   const inputPass = document.getElementById('input-webdav-pass') as HTMLInputElement | null;
   const inputFile = document.getElementById('input-webdav-file') as HTMLInputElement | null;
+  const inputSyncPass = document.getElementById('input-webdav-sync-pass') as HTMLInputElement | null;
+  const btnToggleSyncPass = document.getElementById('btn-toggle-sync-pass') as HTMLButtonElement | null;
 
   const btnTest = document.getElementById('btn-test-webdav');
   const btnSave = document.getElementById('btn-save-webdav');
@@ -558,12 +603,34 @@ function setupWebDAVSync() {
 
   const inputMantra = document.getElementById('input-mantra') as HTMLInputElement | null;
 
+  function normalizeJianguoyunUrl(url: string): string {
+    const trimmed = (url || '').trim();
+    if (/^https?:\/\/dav\.jianguoyun\.com\/dav\/?$/i.test(trimmed)) {
+      return 'https://dav.jianguoyun.com/dav/mantra-key';
+    }
+    return trimmed;
+  }
+
   // 载入保存的配置
   const cfg = getSavedWebDAVConfig();
-  if (inputUrl) inputUrl.value = cfg.serverUrl || '';
+  if (inputUrl) inputUrl.value = cfg.serverUrl || 'https://dav.jianguoyun.com/dav/mantra-key';
   if (inputUser) inputUser.value = cfg.username || '';
   if (inputPass) inputPass.value = cfg.password || '';
   if (inputFile) inputFile.value = cfg.remoteFileName || 'mantra_sync.mkey';
+  if (inputSyncPass) inputSyncPass.value = cfg.syncPassword || '';
+
+  btnToggleSyncPass?.addEventListener('click', () => {
+    if (!inputSyncPass) return;
+    const isPwd = inputSyncPass.type === 'password';
+    inputSyncPass.type = isPwd ? 'text' : 'password';
+    btnToggleSyncPass.textContent = isPwd ? '👀' : '🙈';
+  });
+
+  inputUrl?.addEventListener('blur', () => {
+    if (inputUrl.value) {
+      inputUrl.value = normalizeJianguoyunUrl(inputUrl.value);
+    }
+  });
 
   // 刷新状态与标签
   function refreshStatusView() {
@@ -664,10 +731,11 @@ function setupWebDAVSync() {
   // 保存 WebDAV 配置
   btnSave?.addEventListener('click', () => {
     const currentCfg: WebDAVConfig = {
-      serverUrl: inputUrl?.value?.trim() || '',
+      serverUrl: normalizeJianguoyunUrl(inputUrl?.value || ''),
       username: inputUser?.value?.trim() || '',
       password: inputPass?.value?.trim() || '',
-      remoteFileName: inputFile?.value?.trim() || 'mantra_sync.mkey'
+      remoteFileName: inputFile?.value?.trim() || 'mantra_sync.mkey',
+      syncPassword: inputSyncPass?.value?.trim() || ''
     };
     saveWebDAVConfig(currentCfg);
     refreshStatusView();
@@ -683,7 +751,8 @@ function setupWebDAVSync() {
       serverUrl: inputUrl?.value?.trim() || '',
       username: inputUser?.value?.trim() || '',
       password: inputPass?.value?.trim() || '',
-      remoteFileName: inputFile?.value?.trim() || 'mantra_sync.mkey'
+      remoteFileName: inputFile?.value?.trim() || 'mantra_sync.mkey',
+      syncPassword: inputSyncPass?.value?.trim() || ''
     };
     if (btnTest) btnTest.textContent = '⏳ 正在探测...';
     try {
@@ -696,20 +765,54 @@ function setupWebDAVSync() {
     }
   });
 
+  // 就地请求同步加密密码异步对话框
+  function promptSyncPasswordModal(): Promise<string> {
+    return new Promise((resolve) => {
+      const overlay = document.getElementById('sync-pass-modal-overlay');
+      const input = document.getElementById('modal-sync-pass-input') as HTMLInputElement | null;
+      const btnCancel = document.getElementById('btn-modal-sync-cancel');
+      const btnConfirm = document.getElementById('btn-modal-sync-confirm');
+
+      if (!overlay || !input) {
+        const pass = prompt('检测到云端文件已加密，请输入同步加密密码：');
+        resolve(pass || '');
+        return;
+      }
+
+      input.value = '';
+      overlay.style.display = 'flex';
+      input.focus();
+
+      const cleanup = () => {
+        overlay.style.display = 'none';
+        btnCancel?.removeEventListener('click', onCancel);
+        btnConfirm?.removeEventListener('click', onConfirm);
+      };
+
+      const onCancel = () => {
+        cleanup();
+        resolve('');
+      };
+
+      const onConfirm = () => {
+        const val = input.value.trim();
+        cleanup();
+        resolve(val);
+      };
+
+      btnCancel?.addEventListener('click', onCancel);
+      btnConfirm?.addEventListener('click', onConfirm);
+    });
+  }
+
   // 执行立即同步
   btnSyncNow?.addEventListener('click', async () => {
-    const mantra = inputMantra?.value?.trim();
-    if (!mantra) {
-      alert('同步安全约束：多端同步前需要在本地通过主口令进行端到端加密与解密，请先在上方输入您的主口令！');
-      inputMantra?.focus();
-      return;
-    }
-
     const currentCfg: WebDAVConfig = {
       serverUrl: inputUrl?.value?.trim() || '',
       username: inputUser?.value?.trim() || '',
       password: inputPass?.value?.trim() || '',
-      remoteFileName: inputFile?.value?.trim() || 'mantra_sync.mkey'
+      remoteFileName: inputFile?.value?.trim() || 'mantra_sync.mkey',
+      syncPassword: inputSyncPass?.value?.trim() || ''
     };
 
     if (!currentCfg.serverUrl) {
@@ -727,7 +830,10 @@ function setupWebDAVSync() {
     }
 
     try {
-      const res = await performWebDAVSync(mantra, currentCfg);
+      const res = await performWebDAVSync(currentCfg, promptSyncPasswordModal);
+      if (res.upgradedToEncrypted && inputSyncPass) {
+        inputSyncPass.value = currentCfg.syncPassword || '';
+      }
       refreshStatusView();
       renderRulesList();
       alert(res.ok ? `🎉 ${res.message}` : `⚠️ 同步未完成: ${res.message}`);

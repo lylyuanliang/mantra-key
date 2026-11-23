@@ -69,6 +69,15 @@
 
     <!-- 视窗主体 (清单优先 Manifest-First 架构) -->
     <main class="popup-body">
+      <!-- 扩展自动更新提醒条 (检测到新版本时自动浮现) -->
+      <div class="update-banner" id="update-banner" style="display: none;">
+        <div class="update-banner-content">
+          <span class="update-banner-icon">🚀</span>
+          <span class="update-banner-text" id="update-banner-text">发现新版本</span>
+        </div>
+        <button type="button" class="btn-download-update" id="btn-download-update">⚡ 一键更新</button>
+      </div>
+
       <!-- 当前活动域名卡片 (常驻首屏顶层，打开即知当前站点) -->
       <section class="domain-banner">
         <div class="domain-banner-left">
@@ -102,35 +111,8 @@
         <div class="account-list" id="account-list"></div>
       </div>
 
-      <!-- 视图 1: 记忆口令输入 (无库生成，极简无多余小字微文案) -->
-      <section class="view-locked" id="view-locked">
-        <div class="locked-card">
-          <div class="locked-card-header">
-            <span class="locked-badge">🔑 记忆口令</span>
-            <span class="canary-hex" id="canary-preview-hex" title="防手抖校验指纹">--------</span>
-          </div>
-
-          <div class="password-input-wrap">
-            <input
-              type="password"
-              id="input-master-mantra"
-              class="cyber-input"
-              placeholder="输入您的记忆口令..."
-              autocomplete="off"
-              spellcheck="false"
-            />
-            <button type="button" class="btn-eye" id="btn-toggle-mantra-eye" title="点击显示明文">🙈</button>
-          </div>
-
-          <button class="btn-cyber-primary" id="btn-unlock-submit" type="button">
-            ⚡ 立即生成并启用 (15分钟免输)
-          </button>
-        </div>
-      </section>
-
-      <!-- 视图 2: 已解锁主操作界面 (录入新账号与派生卡片) -->
-      <section class="view-unlocked" id="view-unlocked" style="display: none;">
-        <!-- 快速派生与录入卡片 -->
+      <!-- 账号工作面板 (录入新账号与选定旧记录共用一体化表单，口令同屏联动) -->
+      <section class="work-section" id="work-section">
         <div class="add-account-card" id="add-account-card">
           <div class="add-card-header">
             <span class="add-card-title" id="derive-card-title">⚡ 快速派生与填充</span>
@@ -235,6 +217,30 @@
             </div>
           </div>
 
+          <!-- 记忆口令输入行 (与账号等参数同屏联动，零存储实时计算防手抖指纹) -->
+          <div class="form-row" style="margin-top: 2px;">
+            <div class="form-col flex-1">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                <label class="form-label" for="input-master-mantra" id="mantra-field-label">🔑 记忆口令 (端侧零存储派生)</label>
+                <span class="canary-hex" id="canary-preview-hex" title="防手抖校验指纹">--------</span>
+              </div>
+              <div class="password-input-wrap">
+                <input
+                  type="password"
+                  id="input-master-mantra"
+                  class="cyber-input"
+                  placeholder="输入记忆口令..."
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <button type="button" class="btn-eye" id="btn-toggle-mantra-eye" title="点击显示明文">🙈</button>
+              </div>
+              <div class="session-active-hint" id="session-active-hint" style="display: none; font-size: 10px; color: var(--color-primary); margin-top: 2px;">
+                🟢 口令已在 15 分钟会话内就绪，可直接填入；亦可在此输入新口令覆盖
+              </div>
+            </div>
+          </div>
+
           <!-- 实时派生密码预览行 -->
           <div class="preview-row">
             <div class="preview-left">
@@ -249,7 +255,7 @@
 
           <!-- 操作按钮组 -->
           <div class="add-card-actions">
-            <button type="button" class="btn-action-fill" id="btn-action-autofill">⚡ 一键填充到当前网页</button>
+            <button type="button" class="btn-action-fill" id="btn-action-autofill">⚡ 填入网页</button>
             <button type="button" class="btn-action-save" id="btn-action-save">💾 保存账号并填充</button>
           </div>
         </div>
@@ -324,7 +330,7 @@
 
             <div class="form-col" style="margin-top: 8px;">
               <label class="form-label" for="sync-input-url">WebDAV 服务器地址</label>
-              <input type="text" id="sync-input-url" class="cyber-input" placeholder="例如: https://dav.jianguoyun.com/dav/" />
+              <input type="text" id="sync-input-url" class="cyber-input" placeholder="例如: https://dav.jianguoyun.com/dav/mantra-key" />
             </div>
 
             <div class="form-row" style="margin-top: 8px;">
@@ -343,6 +349,14 @@
               <input type="text" id="sync-input-file" class="cyber-input" value="mantra_sync.mkey" />
             </div>
 
+            <div class="form-col" style="margin-top: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <label class="form-label" for="sync-input-sync-pass">同步加密密码 (选填，留空为明文)</label>
+                <button type="button" id="btn-toggle-sync-pass" style="background: none; border: none; font-size: 10px; color: var(--color-primary); cursor: pointer; padding: 0;">👁️ 显示</button>
+              </div>
+              <input type="password" id="sync-input-sync-pass" class="cyber-input" placeholder="输入独立加密密码，多端配置同一密码" />
+            </div>
+
             <div style="display: flex; gap: 8px; margin-top: 10px;">
               <button type="button" class="btn-secondary" id="btn-popup-test-sync" style="flex: 1; padding: 7px; background: var(--color-surface-subtle); border: 1px solid var(--color-border); color: var(--color-text-main); border-radius: 6px; font-size: 11px; cursor: pointer;">
                 ⚡ 测试连接
@@ -357,7 +371,7 @@
             </button>
 
             <div style="font-size: 10px; color: var(--color-text-muted); line-height: 1.4; margin-top: 8px; background: var(--color-surface-subtle); border: 1px solid var(--color-border); padding: 6px 8px; border-radius: 6px;">
-              💡 <strong>零知识加密保障：</strong>本地使用记忆口令派生密钥进行 AES-256-GCM 加密，云端仅存储密文。
+              💡 <strong>安全同步保障：</strong>若配置了同步加密密码，云端将采用金融级 AES-256-GCM 密文存储；留空则直接存储明文自描述信封。
             </div>
           </div>
 
@@ -395,6 +409,30 @@
         <div class="sync-bottom-return-wrap" style="padding: 10px 12px 24px 12px;">
           <button type="button" class="btn-sync-bottom-return" id="btn-manifest-back-bottom">
             <span>← 返回上一个界面</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 独立同步密码补全弹窗 (当云端文件加密但本地未提供密码时引导) -->
+    <div class="sync-modal-overlay" id="sync-pass-modal-overlay" style="display: none; z-index: 100000;">
+      <div class="sync-modal" style="max-width: 320px; min-height: auto; padding: 14px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+          <span style="font-size: 18px;">🔒</span>
+          <span style="font-weight: 700; font-size: 12.5px; color: var(--color-text-main);">云端文件已加密</span>
+        </div>
+        <div style="font-size: 10.5px; color: var(--color-text-muted); line-height: 1.5; margin-bottom: 10px;">
+          检测到云端文件已在其他设备启用了端到端加密，请输入「同步加密密码」以解锁合并：
+        </div>
+        <div class="form-col" style="margin-bottom: 10px;">
+          <input type="password" id="modal-sync-pass-input" class="cyber-input" placeholder="输入同步加密密码..." style="width: 100%; box-sizing: border-box;" />
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="btn-primary" id="btn-confirm-modal-sync-pass" style="flex: 1; padding: 7px; font-size: 11.5px; font-weight: 700; background: var(--gradient-primary); border: none; border-radius: 6px; color: var(--color-btn-text); cursor: pointer;">
+            解密并记住
+          </button>
+          <button type="button" class="btn-secondary" id="btn-cancel-modal-sync-pass" style="padding: 7px 12px; font-size: 11.5px; background: var(--color-surface-subtle); border: 1px solid var(--color-border); color: var(--color-text-main); border-radius: 6px; cursor: pointer;">
+            取消
           </button>
         </div>
       </div>

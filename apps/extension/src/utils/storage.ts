@@ -167,7 +167,7 @@ export async function getAllAccountsManifest(): Promise<DomainAccountsGroup[]> {
 }
 
 /**
- * 将某个已有域名的账号或服务关联到当前域名 (快速设为别名)
+ * 将某个已有域名的账号或服务关联到当前域名 (快速设为别名并深度对齐密码派生基底)
  */
 export async function linkDomainToExisting(targetDomain: string, sourceDomain: string): Promise<boolean> {
   if (!targetDomain || !sourceDomain) return false;
@@ -179,7 +179,12 @@ export async function linkDomainToExisting(targetDomain: string, sourceDomain: s
   const targetUnicode = toUnicodeDomain(targetDomain).toLowerCase();
   const targetRaw = targetDomain.toLowerCase();
 
-  const updated = sourceAccs.map((acc) => {
+  // 1. 确定统一的 serviceKey 派生基准：
+  // 优先沿用源站点已有的 serviceKey；若未设置，则以源站点规范域名作为所有镜像别名的统一基底
+  const canonicalServiceKey = sourceAccs.find((a) => a.serviceKey)?.serviceKey || sourceDomain.toLowerCase();
+
+  // 2. 更新源站点的记录：固化 serviceKey 并追加 target 域名别名
+  const updatedSource = sourceAccs.map((acc) => {
     const existingAliases = Array.isArray(acc.aliases) ? [...acc.aliases] : [];
     if (!existingAliases.includes(targetUnicode)) {
       existingAliases.push(targetUnicode);
@@ -189,12 +194,62 @@ export async function linkDomainToExisting(targetDomain: string, sourceDomain: s
     }
     return {
       ...acc,
+      serviceKey: canonicalServiceKey,
       aliases: existingAliases,
       updatedAt: Date.now()
     };
   });
 
-  await chrome.storage.local.set({ [sourceKey]: updated });
+  // 3. 关键修复：同步修复目标站点 targetDomain 下可能存在的历史错误记录！
+  // 若目标站点曾录入了该账号（如在镜像站误录入导致生成错误密码），
+  // 将其 serviceKey 强制修改为 canonicalServiceKey，并且版本号、规则等对齐到源站点；
+  // 若目标站点尚未保存该账号，直接克隆源站账号并打上统一 serviceKey
+  const targetKey = `${ACCOUNTS_PREFIX}${targetRaw}`;
+  const existingTargetAccs = (allStorage[targetKey] as AccountRecord[] | undefined) || [];
+  const updatedTarget: AccountRecord[] = [];
+
+  for (const srcAcc of updatedSource) {
+    const foundTarget = existingTargetAccs.find(
+      (t) => t.username.toLowerCase() === srcAcc.username.toLowerCase()
+    );
+    if (foundTarget) {
+      // 覆盖旧的错误记录，强制将密码生成基底与参数切换为 canonicalServiceKey
+      updatedTarget.push({
+        ...foundTarget,
+        serviceKey: canonicalServiceKey,
+        version: srcAcc.version,
+        rulePreset: srcAcc.rulePreset,
+        tag: `已关联: ${toUnicodeDomain(sourceDomain)}`,
+        updatedAt: Date.now(),
+      });
+    } else {
+      // 目标站新建镜像记录
+      updatedTarget.push({
+        ...srcAcc,
+        serviceKey: canonicalServiceKey,
+        tag: `已关联: ${toUnicodeDomain(sourceDomain)}`,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    }
+  }
+
+  // 保留 target 站原来存在但 source 站没有的其他独立账号 (将其 serviceKey 也同步设为 canonicalServiceKey)
+  for (const tAcc of existingTargetAccs) {
+    if (!updatedTarget.some((u) => u.username.toLowerCase() === tAcc.username.toLowerCase())) {
+      updatedTarget.push({
+        ...tAcc,
+        serviceKey: canonicalServiceKey,
+        tag: `已关联: ${toUnicodeDomain(sourceDomain)}`,
+        updatedAt: Date.now(),
+      });
+    }
+  }
+
+  await chrome.storage.local.set({
+    [sourceKey]: updatedSource,
+    [targetKey]: updatedTarget,
+  });
   return true;
 }
 
@@ -212,21 +267,35 @@ export async function saveAccountForDomain(
   const existing = await getAccountsForDomain(domain);
   const now = Date.now();
 
+  // 若当前账号未显式指定 serviceKey，但本站点已有关联的 serviceKey，自动继承
+  let finalServiceKey = account.serviceKey;
+  if (!finalServiceKey) {
+    const existingWithServiceKey = existing.find((a) => a.serviceKey)?.serviceKey;
+    if (existingWithServiceKey) {
+      finalServiceKey = existingWithServiceKey;
+    }
+  }
+
+  const accountToSave = {
+    ...account,
+    serviceKey: finalServiceKey
+  };
+
   const idx = existing.findIndex(
-    (item) => item.username.toLowerCase() === account.username.toLowerCase()
+    (item) => item.username.toLowerCase() === accountToSave.username.toLowerCase()
   );
 
   let finalRecord: AccountRecord;
   if (idx >= 0) {
     finalRecord = {
       ...existing[idx],
-      ...account,
+      ...accountToSave,
       updatedAt: now,
     };
     existing[idx] = finalRecord;
   } else {
     finalRecord = {
-      ...account,
+      ...accountToSave,
       createdAt: now,
       updatedAt: now,
     };

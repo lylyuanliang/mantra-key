@@ -13,11 +13,22 @@ import {
   saveAccountForDomain,
   deleteAccountFromDomain,
   updateAccountVersion,
+  getAllAccountsManifest,
+  linkDomainToExisting,
 } from '../utils/storage';
 import { deriveSitePassword, RulePreset } from '../utils/crypto';
+import { checkExtensionUpdate } from '../utils/update';
 
 export default defineBackground(() => {
   console.log('[MantraKey Ext] Background Service Worker 启动');
+
+  // 周期性与启动时检查更新（针对非 Chrome Web Store 独立发布的扩展）
+  checkExtensionUpdate().then((info) => {
+    if (info?.hasUpdate) {
+      chrome.action.setBadgeText({ text: 'NEW' });
+      chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
+    }
+  }).catch(() => {});
 
   let nativePort: chrome.runtime.Port | null = null;
   let heartbeatManager: HeartbeatManager | null = null;
@@ -313,6 +324,38 @@ export default defineBackground(() => {
       }
       unlockSession(mantra, 900).then((session) => {
         sendResponse({ status: 'ok', session });
+      }).catch((err) => {
+        sendResponse({ status: 'error', message: err?.message });
+      });
+      return true;
+    }
+
+    // 8.2 获取全量账号清单 (供内嵌气泡与 Popup 浏览)
+    if (action === 'GET_ALL_MANIFEST') {
+      getAllAccountsManifest().then((groups) => {
+        sendResponse({ status: 'ok', groups });
+      }).catch(() => {
+        sendResponse({ status: 'ok', groups: [] });
+      });
+      return true;
+    }
+
+    // 8.3 快速关联当前网页至已有站点 (支持镜像域名秒级对齐)
+    if (action === 'LINK_DOMAIN') {
+      const targetDomain = (payload?.targetDomain as string) || '';
+      const sourceDomain = (payload?.sourceDomain as string) || '';
+      linkDomainToExisting(targetDomain, sourceDomain).then((ok) => {
+        sendResponse({ status: ok ? 'ok' : 'error', ok });
+      }).catch((err) => {
+        sendResponse({ status: 'error', message: err?.message });
+      });
+      return true;
+    }
+
+    // 8.4 检查扩展最新版本与下载直链
+    if (action === 'CHECK_EXTENSION_UPDATE') {
+      checkExtensionUpdate().then((info) => {
+        sendResponse({ status: 'ok', data: info });
       }).catch((err) => {
         sendResponse({ status: 'error', message: err?.message });
       });

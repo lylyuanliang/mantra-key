@@ -1,0 +1,4 @@
+dbd4b5887cad34debe68e552aab9de272da902f3996a79665bc5e04e45bbf621 *mantra-key-chrome-extension-v0.1.0.zip
+70571389c5936776cbd258448be78cf6fb1c61966ede92b53ee71f7146e9df28 *mantra-key-desktop-v0.1.0-windows-x64.zip
+9effc2edaf335be222f628bfc6ab8307eb4958420ac58fbe30125fd8d9708e8d *mantra-key-v0.1.0-release.apk
+632c7c628f0f6ca0d1b290a08c2bbedc9679c2619a62802318f8302bc1c6710a *mantra-key-v0.1.0-debug.apk

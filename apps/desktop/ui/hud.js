@@ -444,7 +444,8 @@
         serverUrl: hudWebdavUrl ? hudWebdavUrl.value.trim() : '',
         username: hudWebdavUser ? hudWebdavUser.value.trim() : '',
         password: hudWebdavPass ? hudWebdavPass.value.trim() : '',
-        remoteFileName: hudWebdavFile ? hudWebdavFile.value.trim() : 'mantra_sync.mkey'
+        remoteFileName: hudWebdavFile ? hudWebdavFile.value.trim() : 'mantra_sync.mkey',
+        syncPassword: hudWebdavSyncPass ? hudWebdavSyncPass.value.trim() : ''
       };
       saveDesktopWebDAVConfig(cfg);
       refreshDesktopSyncView();
@@ -456,7 +457,8 @@
         serverUrl: hudWebdavUrl ? hudWebdavUrl.value.trim() : '',
         username: hudWebdavUser ? hudWebdavUser.value.trim() : '',
         password: hudWebdavPass ? hudWebdavPass.value.trim() : '',
-        remoteFileName: hudWebdavFile ? hudWebdavFile.value.trim() : 'mantra_sync.mkey'
+        remoteFileName: hudWebdavFile ? hudWebdavFile.value.trim() : 'mantra_sync.mkey',
+        syncPassword: hudWebdavSyncPass ? hudWebdavSyncPass.value.trim() : ''
       };
       if (btnHudTestSync) btnHudTestSync.textContent = '⏳ 测试中...';
       try {
@@ -489,18 +491,12 @@
     });
 
     btnHudDoSync?.addEventListener('click', async () => {
-      const mantra = mantraInput ? mantraInput.value.trim() : '';
-      if (!mantra) {
-        alert('多端同步需要使用主口令进行端到端加解密，请先输入主口令！');
-        if (mantraInput) mantraInput.focus();
-        return;
-      }
-
       const cfg = {
         serverUrl: hudWebdavUrl ? hudWebdavUrl.value.trim() : '',
         username: hudWebdavUser ? hudWebdavUser.value.trim() : '',
         password: hudWebdavPass ? hudWebdavPass.value.trim() : '',
-        remoteFileName: hudWebdavFile ? hudWebdavFile.value.trim() : 'mantra_sync.mkey'
+        remoteFileName: hudWebdavFile ? hudWebdavFile.value.trim() : 'mantra_sync.mkey',
+        syncPassword: hudWebdavSyncPass ? hudWebdavSyncPass.value.trim() : ''
       };
 
       if (!cfg.serverUrl) {
@@ -522,6 +518,8 @@
 
         const localManifest = getDesktopManifest();
         let remoteManifest = null;
+        let remoteIsEncrypted = false;
+        let activeSyncPassword = cfg.syncPassword;
 
         try {
           const getRes = await fetch(remoteUrl, {
@@ -532,10 +530,34 @@
           if (getRes.ok) {
             const buf = await getRes.arrayBuffer();
             if (buf.byteLength > 0) {
-              remoteManifest = await unpackDesktopEnvelope(new Uint8Array(buf), mantra);
+              try {
+                const unpackRes = await unpackDesktopEnvelope(new Uint8Array(buf), activeSyncPassword);
+                remoteManifest = unpackRes.manifest;
+                remoteIsEncrypted = unpackRes.isEncrypted;
+              } catch (unpackErr) {
+                if (unpackErr.code === 'NEED_SYNC_PASSWORD') {
+                  const inputPass = prompt('检测到云端文件已启用端到端加密，请输入同步加密密码：');
+                  if (!inputPass || !inputPass.trim()) {
+                    throw new Error('同步已取消：云端数据已加密，需要同步密码方可合并');
+                  }
+                  activeSyncPassword = inputPass.trim();
+                  cfg.syncPassword = activeSyncPassword;
+                  saveDesktopWebDAVConfig(cfg);
+                  if (hudWebdavSyncPass) hudWebdavSyncPass.value = activeSyncPassword;
+
+                  const retryRes = await unpackDesktopEnvelope(new Uint8Array(buf), activeSyncPassword);
+                  remoteManifest = retryRes.manifest;
+                  remoteIsEncrypted = retryRes.isEncrypted;
+                } else {
+                  throw unpackErr;
+                }
+              }
             }
           }
         } catch (e) {
+          if (e.code === 'NEED_SYNC_PASSWORD' || e.code === 'PASSWORD_MISMATCH' || e.message?.includes('密码')) {
+            throw e;
+          }
           console.warn('[HUD Sync] 获取远程文件异常:', e);
         }
 
@@ -546,7 +568,7 @@
         finalManifest.updatedAt = Date.now();
         saveDesktopManifest(finalManifest);
 
-        const newEnvelope = await packDesktopEnvelope(finalManifest, mantra);
+        const newEnvelope = await packDesktopEnvelope(finalManifest, activeSyncPassword);
         const putRes = await fetch(remoteUrl, {
           method: 'PUT',
           headers: {
@@ -563,15 +585,20 @@
 
         const count = Object.keys(finalManifest.domains).length;
         const timeStr = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const upgraded = !remoteIsEncrypted && !!activeSyncPassword;
+        const successMsg = upgraded
+          ? `同步成功并已升格为 AES-256-GCM 加密！已合并 ${count} 个站点规则`
+          : `WebDAV 同步成功！已合并 ${count} 个站点规则`;
+
         saveDesktopSyncInfo({
           status: 'success',
           lastSyncTime: timeStr,
-          message: `同步成功！已自动合并 ${count} 个站点规则`,
+          message: successMsg,
           syncedDomainsCount: count
         });
 
         refreshDesktopSyncView();
-        showToast(`WebDAV 同步成功！已合并 ${count} 个站点规则`, 'success', '🌐');
+        showToast(successMsg, 'success', '🌐');
       } catch (err) {
         saveDesktopSyncInfo({
           status: 'error',
@@ -596,13 +623,14 @@
   const hudWebdavUser = document.getElementById('hudWebdavUser');
   const hudWebdavPass = document.getElementById('hudWebdavPass');
   const hudWebdavFile = document.getElementById('hudWebdavFile');
+  const hudWebdavSyncPass = document.getElementById('hudWebdavSyncPass');
 
   function getDesktopWebDAVConfig() {
     try {
       const raw = localStorage.getItem('mk_webdav_config');
       if (raw) return JSON.parse(raw);
     } catch {}
-    return { serverUrl: '', username: '', password: '', remoteFileName: 'mantra_sync.mkey' };
+    return { serverUrl: '', username: '', password: '', remoteFileName: 'mantra_sync.mkey', syncPassword: '' };
   }
 
   function saveDesktopWebDAVConfig(cfg) {
@@ -662,6 +690,7 @@
     if (hudWebdavUser && !hudWebdavUser.value) hudWebdavUser.value = cfg.username || '';
     if (hudWebdavPass && !hudWebdavPass.value) hudWebdavPass.value = cfg.password || '';
     if (hudWebdavFile && !hudWebdavFile.value) hudWebdavFile.value = cfg.remoteFileName || 'mantra_sync.mkey';
+    if (hudWebdavSyncPass && !hudWebdavSyncPass.value) hudWebdavSyncPass.value = cfg.syncPassword || '';
 
     if (hudSyncTimeText) {
       hudSyncTimeText.textContent = info.lastSyncTime ? `上次同步: ${info.lastSyncTime}` : '上次同步: 尚未同步';
@@ -684,13 +713,29 @@
     }
   }
 
-  async function packDesktopEnvelope(manifest, masterMantra) {
+  async function packDesktopEnvelope(manifest, syncPassword) {
     const enc = new TextEncoder();
     const manifestBytes = enc.encode(JSON.stringify(manifest));
+
+    if (!syncPassword || !syncPassword.trim()) {
+      const envelope = new Uint8Array(3 + manifestBytes.length);
+      envelope[0] = 0x4D;
+      envelope[1] = 0x4B;
+      envelope[2] = 0x00;
+      envelope.set(manifestBytes, 3);
+      return envelope;
+    }
+
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const iv = crypto.getRandomValues(new Uint8Array(12));
 
-    const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(masterMantra), { name: 'PBKDF2' }, false, ['deriveKey']);
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      enc.encode(syncPassword.trim()),
+      { name: 'PBKDF2' },
+      false,
+      ['deriveKey']
+    );
     const aesKey = await crypto.subtle.deriveKey(
       { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
       keyMaterial,
@@ -702,7 +747,7 @@
     const cipherBuffer = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, manifestBytes);
     const cipherBytes = new Uint8Array(cipherBuffer);
 
-    const envelope = new Uint8Array(2 + 1 + 16 + 12 + cipherBytes.length);
+    const envelope = new Uint8Array(3 + 16 + 12 + cipherBytes.length);
     envelope[0] = 0x4D;
     envelope[1] = 0x4B;
     envelope[2] = 0x01;
@@ -712,27 +757,64 @@
     return envelope;
   }
 
-  async function unpackDesktopEnvelope(envelope, masterMantra) {
-    if (envelope.length < 3 + 16 + 12 + 16) throw new Error('信封数据损坏');
-    if (envelope[0] !== 0x4D || envelope[1] !== 0x4B) throw new Error('无效信封魔数');
-
-    const salt = envelope.slice(3, 3 + 16);
-    const iv = envelope.slice(3 + 16, 3 + 16 + 12);
-    const cipherBytes = envelope.slice(3 + 16 + 12);
-
-    const enc = new TextEncoder();
-    const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(masterMantra), { name: 'PBKDF2' }, false, ['deriveKey']);
-    const aesKey = await crypto.subtle.deriveKey(
-      { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
-      keyMaterial,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['decrypt']
-    );
-
-    const plainBuffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, cipherBytes);
+  async function unpackDesktopEnvelope(envelope, syncPassword) {
+    if (!envelope || envelope.length === 0) throw new Error('同步数据为空');
     const dec = new TextDecoder();
-    return JSON.parse(dec.decode(plainBuffer));
+
+    // 1. raw JSON
+    if (envelope[0] === 0x7B || envelope[0] === 0x5B) {
+      return { manifest: JSON.parse(dec.decode(envelope)), isEncrypted: false };
+    }
+
+    // 2. check MK
+    if (envelope.length < 3 || envelope[0] !== 0x4D || envelope[1] !== 0x4B) {
+      throw new Error('无效的同步信封格式魔数');
+    }
+
+    const flag = envelope[2];
+    if (flag === 0x00) {
+      return { manifest: JSON.parse(dec.decode(envelope.slice(3))), isEncrypted: false };
+    }
+
+    if (flag === 0x01) {
+      if (!syncPassword || !syncPassword.trim()) {
+        const err = new Error('检测到云端文件已启用端到端加密，请输入同步加密密码');
+        err.code = 'NEED_SYNC_PASSWORD';
+        throw err;
+      }
+      if (envelope.length < 3 + 16 + 12 + 16) throw new Error('加密信封数据损坏');
+
+      const salt = envelope.slice(3, 3 + 16);
+      const iv = envelope.slice(3 + 16, 3 + 16 + 12);
+      const cipherBytes = envelope.slice(3 + 16 + 12);
+
+      const enc = new TextEncoder();
+      const keyMaterial = await crypto.subtle.importKey(
+        'raw',
+        enc.encode(syncPassword.trim()),
+        { name: 'PBKDF2' },
+        false,
+        ['deriveKey']
+      );
+      const aesKey = await crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['decrypt']
+      );
+
+      try {
+        const plainBuffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, cipherBytes);
+        return { manifest: JSON.parse(dec.decode(plainBuffer)), isEncrypted: true };
+      } catch (e) {
+        const err = new Error('同步加密密码不匹配，无法解密');
+        err.code = 'PASSWORD_MISMATCH';
+        throw err;
+      }
+    }
+
+    throw new Error('不支持的同步信封版本: 0x' + flag.toString(16));
   }
 
   function mergeDesktopManifests(local, remote) {

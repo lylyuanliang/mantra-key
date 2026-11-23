@@ -39,6 +39,7 @@ export interface WebDAVConfig {
   username: string;
   password: string;
   remoteFileName: string;
+  syncPassword?: string; // 独立可选的端到端同步加密密码 (留空为明文存储，填写为 AES-256-GCM 密文存储)
 }
 
 export interface SyncStatusInfo {
@@ -53,13 +54,31 @@ const STORAGE_KEY_SYNC_INFO = 'mk_sync_status_info';
 const ACCOUNTS_PREFIX = 'mantra_accs_';
 
 /**
+ * 规范化 WebDAV URL：
+ * 坚果云地址默认自动补充 /mantra-key 二级目录，允许用户自定义；同时修剪末尾多余斜杠
+ */
+export function normalizeWebDAVUrl(rawUrl: string): string {
+  if (!rawUrl) return '';
+  const trimmed = rawUrl.trim();
+  // 用户直接复制坚果云根地址: https://dav.jianguoyun.com/dav 或 https://dav.jianguoyun.com/dav/
+  if (/^https?:\/\/dav\.jianguoyun\.com\/dav\/?$/i.test(trimmed)) {
+    return 'https://dav.jianguoyun.com/dav/mantra-key';
+  }
+  return trimmed;
+}
+
+/**
  * 读取持久化的 WebDAV 配置
  */
 export async function getWebDAVConfig(): Promise<WebDAVConfig> {
   try {
     const res = await chrome.storage.local.get([STORAGE_KEY_CONFIG]);
     if (res[STORAGE_KEY_CONFIG]) {
-      return res[STORAGE_KEY_CONFIG];
+      const cfg = res[STORAGE_KEY_CONFIG] as WebDAVConfig;
+      return {
+        ...cfg,
+        serverUrl: normalizeWebDAVUrl(cfg.serverUrl || '')
+      };
     }
   } catch {}
   return {
@@ -74,7 +93,11 @@ export async function getWebDAVConfig(): Promise<WebDAVConfig> {
  * 保存 WebDAV 配置
  */
 export async function saveWebDAVConfig(config: WebDAVConfig): Promise<void> {
-  await chrome.storage.local.set({ [STORAGE_KEY_CONFIG]: config });
+  const normalized: WebDAVConfig = {
+    ...config,
+    serverUrl: normalizeWebDAVUrl(config.serverUrl)
+  };
+  await chrome.storage.local.set({ [STORAGE_KEY_CONFIG]: normalized });
 }
 
 /**
@@ -234,18 +257,31 @@ export function mergeManifests(local: ExtensionManifest, remote: ExtensionManife
 }
 
 /**
- * 打包加密 E2EE 信封
+ * 打包自描述同步信封 (Self-Describing Sync Envelope)
+ * - 若 syncPassword 为空：生成 0x00 状态码（未加密纯明文 JSON 信封）
+ * - 若 syncPassword 有值：生成 0x01 状态码（金融级 AES-256-GCM 密文信封）
  */
-export async function packE2EEEnvelope(manifest: ExtensionManifest, masterMantra: string): Promise<Uint8Array> {
+export async function packSyncEnvelope(manifest: ExtensionManifest, syncPassword?: string): Promise<Uint8Array> {
   const enc = new TextEncoder();
   const manifestBytes = enc.encode(JSON.stringify(manifest));
 
+  if (!syncPassword || !syncPassword.trim()) {
+    // 状态码 0x00: 未加密明文自描述信封
+    const envelope = new Uint8Array(3 + manifestBytes.length);
+    envelope[0] = 0x4D; // 'M'
+    envelope[1] = 0x4B; // 'K'
+    envelope[2] = 0x00; // 0x00: 未加密明文
+    envelope.set(manifestBytes, 3);
+    return envelope;
+  }
+
+  // 状态码 0x01: 已加密，PBKDF2(100k次) + AES-256-GCM
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
 
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
-    enc.encode(masterMantra),
+    enc.encode(syncPassword.trim()),
     { name: 'PBKDF2' },
     false,
     ['deriveKey']
@@ -271,11 +307,10 @@ export async function packE2EEEnvelope(manifest: ExtensionManifest, masterMantra
   );
   const cipherBytes = new Uint8Array(cipherBuffer);
 
-  const totalLength = 2 + 1 + 16 + 12 + cipherBytes.length;
-  const envelope = new Uint8Array(totalLength);
+  const envelope = new Uint8Array(3 + 16 + 12 + cipherBytes.length);
   envelope[0] = 0x4D; // 'M'
   envelope[1] = 0x4B; // 'K'
-  envelope[2] = 0x01; // Version 1
+  envelope[2] = 0x01; // 0x01: 已加密
   envelope.set(salt, 3);
   envelope.set(iv, 3 + 16);
   envelope.set(cipherBytes, 3 + 16 + 12);
@@ -284,50 +319,118 @@ export async function packE2EEEnvelope(manifest: ExtensionManifest, masterMantra
 }
 
 /**
- * 解密解包 E2EE 信封
+ * 打包加密 E2EE 信封 (向前兼容别名)
  */
-export async function unpackE2EEEnvelope(envelope: Uint8Array, masterMantra: string): Promise<ExtensionManifest> {
-  if (envelope.length < 3 + 16 + 12 + 16) {
-    throw new Error('信封数据损坏: 字节长度不足');
+export async function packE2EEEnvelope(manifest: ExtensionManifest, syncPassword?: string): Promise<Uint8Array> {
+  return packSyncEnvelope(manifest, syncPassword);
+}
+
+export interface UnpackResult {
+  manifest: ExtensionManifest;
+  isEncrypted: boolean;
+}
+
+/**
+ * 解包自描述同步信封 (Self-Describing Sync Envelope)
+ * - 自动识别纯 JSON 文本（向前兼容）
+ * - 自动识别 0x00 明文信封（无需密码）
+ * - 自动识别 0x01 密文信封（若未传密码抛出 NEED_SYNC_PASSWORD，若密码不匹配抛出 PASSWORD_MISMATCH）
+ */
+export async function unpackSyncEnvelope(envelope: Uint8Array, syncPassword?: string): Promise<UnpackResult> {
+  if (envelope.length === 0) {
+    throw new Error('同步数据为空');
   }
 
-  if (envelope[0] !== 0x4D || envelope[1] !== 0x4B) {
-    throw new Error('无效的同步信封魔数');
-  }
-
-  const salt = envelope.slice(3, 3 + 16);
-  const iv = envelope.slice(3 + 16, 3 + 16 + 12);
-  const cipherBytes = envelope.slice(3 + 16 + 12);
-
-  const enc = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    enc.encode(masterMantra),
-    { name: 'PBKDF2' },
-    false,
-    ['deriveKey']
-  );
-
-  const aesKey = await crypto.subtle.deriveKey(
-    {
-      name: 'PBKDF2',
-      salt,
-      iterations: 100000,
-      hash: 'SHA-256'
-    },
-    keyMaterial,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['decrypt']
-  );
-
-  const plainBuffer = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv },
-    aesKey,
-    cipherBytes
-  );
   const dec = new TextDecoder();
-  return JSON.parse(dec.decode(plainBuffer)) as ExtensionManifest;
+
+  // 1. 向前兼容最原始的纯 JSON 文本 (以 '{' 或 '[' 开头)
+  if (envelope[0] === 0x7B || envelope[0] === 0x5B) {
+    return {
+      manifest: JSON.parse(dec.decode(envelope)) as ExtensionManifest,
+      isEncrypted: false
+    };
+  }
+
+  // 2. 校验 MK 魔数
+  if (envelope.length < 3 || envelope[0] !== 0x4D || envelope[1] !== 0x4B) {
+    throw new Error('无效的同步信封格式魔数');
+  }
+
+  const flag = envelope[2];
+
+  // 3. 状态码 0x00: 未加密明文自描述信封
+  if (flag === 0x00) {
+    const jsonStr = dec.decode(envelope.slice(3));
+    return {
+      manifest: JSON.parse(jsonStr) as ExtensionManifest,
+      isEncrypted: false
+    };
+  }
+
+  // 4. 状态码 0x01: 已加密 AES-256-GCM 信封
+  if (flag === 0x01) {
+    if (!syncPassword || !syncPassword.trim()) {
+      const err: any = new Error('检测到云端文件已启用端到端加密，请输入同步加密密码');
+      err.code = 'NEED_SYNC_PASSWORD';
+      throw err;
+    }
+
+    if (envelope.length < 3 + 16 + 12 + 16) {
+      throw new Error('加密信封数据损坏: 字节长度不足');
+    }
+
+    const salt = envelope.slice(3, 3 + 16);
+    const iv = envelope.slice(3 + 16, 3 + 16 + 12);
+    const cipherBytes = envelope.slice(3 + 16 + 12);
+
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      enc.encode(syncPassword.trim()),
+      { name: 'PBKDF2' },
+      false,
+      ['deriveKey']
+    );
+
+    const aesKey = await crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt,
+        iterations: 100000,
+        hash: 'SHA-256'
+      },
+      keyMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['decrypt']
+    );
+
+    try {
+      const plainBuffer = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv },
+        aesKey,
+        cipherBytes
+      );
+      return {
+        manifest: JSON.parse(dec.decode(plainBuffer)) as ExtensionManifest,
+        isEncrypted: true
+      };
+    } catch (e: any) {
+      const err: any = new Error('同步加密密码不匹配，无法解密云端数据');
+      err.code = 'PASSWORD_MISMATCH';
+      throw err;
+    }
+  }
+
+  throw new Error(`不支持的同步信封版本: 0x${flag.toString(16)}`);
+}
+
+/**
+ * 解密解包 E2EE 信封 (向前兼容别名)
+ */
+export async function unpackE2EEEnvelope(envelope: Uint8Array, syncPassword?: string): Promise<ExtensionManifest> {
+  const res = await unpackSyncEnvelope(envelope, syncPassword);
+  return res.manifest;
 }
 
 /**
@@ -370,17 +473,29 @@ export async function testWebDAVConnection(config: WebDAVConfig): Promise<{ ok: 
 }
 
 /**
- * 执行双向同步
+ * 执行双向同步 (支持独立同步加密密码与就地按需弹窗引导)
  */
 export async function performWebDAVSync(
-  masterMantra: string,
-  config?: WebDAVConfig
-): Promise<{ ok: boolean; message: string; mergedCount: number }> {
-  if (!masterMantra || !masterMantra.trim()) {
-    return { ok: false, message: '请先输入记忆口令', mergedCount: 0 };
+  arg1?: string | WebDAVConfig,
+  arg2?: WebDAVConfig | (() => Promise<string | null>),
+  arg3?: () => Promise<string | null>
+): Promise<{ ok: boolean; message: string; mergedCount: number; isEncrypted?: boolean; code?: string }> {
+  let cfg: WebDAVConfig;
+  let onNeedPassword: (() => Promise<string | null>) | undefined;
+
+  if (typeof arg1 === 'string') {
+    // 兼容历史调用: performWebDAVSync(masterMantra, config, onNeedPassword)
+    cfg = (arg2 as WebDAVConfig) || await getWebDAVConfig();
+    if (!cfg.syncPassword && arg1) {
+      cfg.syncPassword = arg1;
+    }
+    onNeedPassword = arg3;
+  } else {
+    // 现代解耦调用: performWebDAVSync(config, onNeedPassword)
+    cfg = arg1 || await getWebDAVConfig();
+    onNeedPassword = arg2 as (() => Promise<string | null>) | undefined;
   }
 
-  const cfg = config || await getWebDAVConfig();
   let base = cfg.serverUrl.trim().replace(/\/+$/, '');
   if (!base) return { ok: false, message: '尚未配置 WebDAV 服务器地址', mergedCount: 0 };
   if (!/^https?:\/\//i.test(base)) base = 'https://' + base;
@@ -391,6 +506,7 @@ export async function performWebDAVSync(
 
   const localManifest = await exportLocalManifest();
   let remoteManifest: ExtensionManifest | null = null;
+  let remoteIsEncrypted = false;
 
   try {
     const getRes = await fetch(remoteFileUrl, {
@@ -406,12 +522,38 @@ export async function performWebDAVSync(
     if (getRes.ok) {
       const buffer = await getRes.arrayBuffer();
       if (buffer.byteLength > 0) {
-        remoteManifest = await unpackE2EEEnvelope(new Uint8Array(buffer), masterMantra);
+        const envelopeBytes = new Uint8Array(buffer);
+        let syncPassword = cfg.syncPassword;
+
+        // 若云端为 0x01 加密信封，但本地未提供同步密码
+        if (envelopeBytes.length >= 3 && envelopeBytes[0] === 0x4D && envelopeBytes[1] === 0x4B && envelopeBytes[2] === 0x01) {
+          remoteIsEncrypted = true;
+          if (!syncPassword || !syncPassword.trim()) {
+            if (onNeedPassword) {
+              const entered = await onNeedPassword();
+              if (!entered || !entered.trim()) {
+                return { ok: false, code: 'NEED_SYNC_PASSWORD', message: '已取消输入同步加密密码，未执行同步', mergedCount: 0 };
+              }
+              syncPassword = entered.trim();
+              cfg.syncPassword = syncPassword;
+              await saveWebDAVConfig(cfg);
+            } else {
+              return { ok: false, code: 'NEED_SYNC_PASSWORD', message: '检测到云端文件已启用端到端加密，请输入同步加密密码', mergedCount: 0 };
+            }
+          }
+        }
+
+        const unpacked = await unpackSyncEnvelope(envelopeBytes, syncPassword);
+        remoteManifest = unpacked.manifest;
+        remoteIsEncrypted = unpacked.isEncrypted;
       }
     }
   } catch (err: any) {
-    if (err?.message?.includes('解密失败')) {
-      return { ok: false, message: err.message, mergedCount: 0 };
+    if (err?.code === 'NEED_SYNC_PASSWORD' || err?.code === 'PASSWORD_MISMATCH') {
+      return { ok: false, code: err.code, message: err.message, mergedCount: 0 };
+    }
+    if (!err?.message?.includes('404')) {
+      console.warn('读取云端同步文件提示:', err);
     }
   }
 
@@ -423,7 +565,8 @@ export async function performWebDAVSync(
 
   await importMergedManifest(finalManifest);
 
-  const newEnvelope = await packE2EEEnvelope(finalManifest, masterMantra);
+  // 决定回写的信封类型：以当前的 cfg.syncPassword 为准 (有密码则 0x01 密文，无密码则 0x00 明文)
+  const newEnvelope = await packSyncEnvelope(finalManifest, cfg.syncPassword);
 
   try {
     const putRes = await fetch(remoteFileUrl, {
@@ -432,7 +575,7 @@ export async function performWebDAVSync(
         'Authorization': authHeader,
         'Content-Type': 'application/octet-stream'
       },
-      body: newEnvelope,
+      body: newEnvelope as unknown as BodyInit,
       signal: AbortSignal.timeout(10000)
     });
 
@@ -445,10 +588,11 @@ export async function performWebDAVSync(
 
   const count = Object.keys(finalManifest.domains).length;
   const timeStr = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const encryptTag = cfg.syncPassword ? ' (密文存储已加固)' : ' (明文存储)';
   const statusInfo: SyncStatusInfo = {
     status: 'success',
     lastSyncTime: timeStr,
-    message: `同步成功！已自动合并 ${count} 个站点凭据`,
+    message: `同步成功！已自动合并 ${count} 个站点凭据${encryptTag}`,
     syncedDomainsCount: count
   };
   await chrome.storage.local.set({ [STORAGE_KEY_SYNC_INFO]: statusInfo });
@@ -456,6 +600,7 @@ export async function performWebDAVSync(
   return {
     ok: true,
     message: statusInfo.message,
-    mergedCount: count
+    mergedCount: count,
+    isEncrypted: Boolean(cfg.syncPassword)
   };
 }

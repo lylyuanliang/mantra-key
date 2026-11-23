@@ -247,6 +247,7 @@ export default defineContentScript({
 
     /**
      * 弹出 Screen 01 悬浮内嵌气泡卡片 (100% 挂载在 body 上，彻底防裁剪)
+     * 支持查看账号清单、常变镜像关联操作、选定记录看详情以及录入新账号口令同屏联动
      */
     async function renderAutofillBubble(anchorInput: HTMLInputElement) {
       closeBubble();
@@ -257,8 +258,12 @@ export default defineContentScript({
       bubble.className = 'mantra-bubble-container';
       bubble.id = 'mantra-autofill-bubble';
 
+      // 阻止气泡内部点击冒泡到 document 触发关闭
+      bubble.addEventListener('click', (e) => e.stopPropagation());
+      bubble.addEventListener('mousedown', (e) => e.stopPropagation());
+
       // 查询会话状态、本站点真实已存账号与当前主题 (带超时与兜底保障)
-      const [sessionRes, accountsRes, themeRes] = await Promise.all([
+      let [sessionRes, accountsRes, themeRes] = await Promise.all([
         safeSendMessage<{ data?: { session_state?: string; ttl_remaining?: number; canary?: string } }>({ action: 'QUERY_SESSION' }, 600),
         safeSendMessage<{ accounts?: Array<{ username: string; version: number; rulePreset: string; tag?: string; serviceKey?: string }> }>({
           action: 'GET_ACCOUNTS_FOR_DOMAIN',
@@ -270,87 +275,558 @@ export default defineContentScript({
       const currentTheme = themeRes?.theme === 'dark' ? 'dark' : 'light';
       bubble.setAttribute('data-theme', currentTheme);
 
-      const isUnlocked = sessionRes?.data?.session_state === 'unlocked';
-      const ttlMinutes = Math.floor((sessionRes?.data?.ttl_remaining || 0) / 60);
-      const canaryText = sessionRes?.data?.canary ? `[${sessionRes.data.canary}]` : '待计算';
-      const accounts = accountsRes?.accounts || [];
+      let isUnlocked = sessionRes?.data?.session_state === 'unlocked';
+      let ttlMinutes = Math.floor((sessionRes?.data?.ttl_remaining || 0) / 60);
+      let canaryText = sessionRes?.data?.canary ? `[${sessionRes.data.canary}]` : '待计算';
+      let accounts = accountsRes?.accounts || [];
 
-      let accountsHtml = '';
-      if (!isUnlocked) {
-        accountsHtml = `
-          <div class="mantra-inline-unlock-box">
-            <div class="mantra-inline-unlock-header">
-              <span class="mantra-inline-title">🔑 输入记忆口令</span>
-              <span class="mantra-inline-canary" id="bubble-canary-badge">--------</span>
-            </div>
-            <div class="mantra-inline-input-wrap">
-              <input
-                type="password"
-                id="bubble-input-mantra"
-                class="mantra-bubble-input"
-                data-mantra-internal="true"
-                data-mantra-bound="true"
-                placeholder="输入记忆口令，回车自动生成并填入..."
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <button type="button" class="mantra-bubble-btn-eye" id="bubble-btn-eye" title="切换明文">👁️</button>
-            </div>
-            <button type="button" class="mantra-bubble-btn-unlock" id="bubble-btn-unlock">
-              ⚡ 立即生成并自动填充
-            </button>
-          </div>
-        `;
-      } else if (accounts.length === 0) {
-        accountsHtml = `
-          <div class="mantra-inline-unlock-box">
-            <div style="font-size: 11px; color: #94a3b8; line-height: 1.4;">
-              当前站点 <strong style="color: #00f0ff;">${displayDomain}</strong> 暂未保存账号，直接录入即可秒级填充：
-            </div>
-            <div style="display: flex; gap: 6px; margin-top: 4px;">
-              <input type="text" id="bubble-quick-user" class="mantra-bubble-input" placeholder="输入账号或邮箱 (如 user@domain.com)" />
-              <button type="button" class="mantra-bubble-btn-unlock" id="bubble-quick-fill-btn" style="width: auto; padding: 0 14px; white-space: nowrap;">⚡ 派生并填充</button>
-            </div>
-          </div>
-        `;
-      } else {
-        accountsHtml = accounts.map((acc, idx) => `
-          <div class="mantra-card ${idx === 0 ? 'active' : ''}" data-user="${acc.username}" data-version="${acc.version}" data-rule="${acc.rulePreset}">
-            <div class="mantra-card-strip"></div>
-            <div class="mantra-card-left">
-              <div class="mantra-card-user-row">
-                <span class="mantra-card-username">${acc.username}</span>
-                <span class="mantra-card-badge ${acc.tag === 'Work' ? 'mantra-badge-enterprise' : 'mantra-badge-primary'}">${acc.tag || 'v' + acc.version}</span>
-              </div>
-              <div class="mantra-card-sub-row">
-                <span class="mantra-rule-preset">${acc.rulePreset} (v${acc.version})</span>
-                <span class="mantra-mask-preview">••••••••</span>
-              </div>
-            </div>
-            <div class="mantra-card-right">
-              <button type="button" class="mantra-shortcut-pill">⚡ 填充</button>
-            </div>
-          </div>
-        `).join('');
+      // 气泡内部导航状态
+      let currentView: 'main' | 'manifest' = 'main';
+      let selectedAccountIndex = 0;
+      let isNewAccountMode = accounts.length === 0;
+
+      function renderBubbleContent() {
+        if (currentView === 'manifest') {
+          renderManifestView();
+        } else {
+          renderMainView();
+        }
       }
 
+      function updateFooter() {
+        const footerEl = bubble.querySelector('#bubble-footer');
+        if (footerEl) {
+          footerEl.innerHTML = `
+            <div class="mantra-telemetry-item">
+              <span>TTL: <span class="mantra-telemetry-highlight">${isUnlocked ? `${ttlMinutes}m` : '待就绪'}</span></span>
+            </div>
+            <div>•</div>
+            <div class="mantra-telemetry-item">
+              <span>金丝雀: <span class="mantra-telemetry-primary">${canaryText}</span></span>
+            </div>
+            <div>•</div>
+            <div>零存储派生</div>
+          `;
+        }
+        const statusText = bubble.querySelector('#bubble-status-text');
+        const pulseDot = bubble.querySelector('#bubble-pulse-dot');
+        if (statusText) statusText.textContent = isUnlocked ? '已就绪' : '待输入';
+        if (pulseDot) {
+          (pulseDot as HTMLElement).style.cssText = isUnlocked ? '' : 'background-color: #94a3b8; box-shadow: none;';
+        }
+      }
+
+      function renderMainView() {
+        const selectedAcc = accounts[selectedAccountIndex] || accounts[0];
+
+        let accountsListHtml = '';
+        if (accounts.length > 0) {
+          accountsListHtml = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-size: 11px; font-weight: 600; color: #64748b;">本站已存账号 (${accounts.length})</span>
+              <button type="button" class="mantra-bubble-header-btn" id="bubble-btn-toggle-add" style="padding: 2px 6px;">
+                ${isNewAccountMode ? '📋 查看已有账号' : '+ 录入新账号'}
+              </button>
+            </div>
+            ${!isNewAccountMode ? `
+              <div class="mantra-cards-list">
+                ${accounts.map((acc, idx) => `
+                  <div class="mantra-card ${idx === selectedAccountIndex ? 'active' : ''}" data-idx="${idx}" style="cursor: pointer;">
+                    <div class="mantra-card-strip"></div>
+                    <div class="mantra-card-left">
+                      <div class="mantra-card-user-row">
+                        <span class="mantra-card-username">${acc.username}</span>
+                        <span class="mantra-card-badge">${acc.tag || 'v' + acc.version}</span>
+                      </div>
+                      <div class="mantra-card-sub-row">
+                        <span class="mantra-rule-preset">${acc.rulePreset || 'standard-16'} (v${acc.version})</span>
+                      </div>
+                    </div>
+                    <div class="mantra-card-right">
+                      <span style="font-size: 10px; color: ${idx === selectedAccountIndex ? '#0d9488' : '#94a3b8'}; font-weight: 600;">
+                        ${idx === selectedAccountIndex ? '✓ 选定' : '点击查看'}
+                      </span>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+          `;
+        }
+
+        let detailOrAddHtml = '';
+        if (isNewAccountMode || accounts.length === 0) {
+          // 录入新账号模式：账号名、版本、规则与记忆口令同屏出现联动
+          detailOrAddHtml = `
+            <div class="bubble-account-detail-box">
+              <div style="font-size: 11px; font-weight: 700; color: #0f172a; margin-bottom: 2px;">
+                ⚡ 录入新账号并秒级派生
+              </div>
+              <div>
+                <input type="text" id="bubble-new-user" class="mantra-bubble-input" placeholder="输入账号或邮箱 (如 user@domain.com)" autocomplete="off" />
+              </div>
+              <div style="display: flex; gap: 6px; align-items: center;">
+                <select id="bubble-new-rule" class="mantra-bubble-input" style="flex: 2; padding: 4px 6px; font-size: 10.5px;">
+                  <option value="standard-16">16位标准 (字母+数字+符号)</option>
+                  <option value="secure-20">20位高强 (高熵防破)</option>
+                  <option value="super-32">32位极端安全</option>
+                  <option value="alphanumeric-16">16位无符号 (纯字母数字)</option>
+                  <option value="pin-6">6位数字 PIN</option>
+                </select>
+                <div class="bubble-ver-stepper" style="flex: 1; justify-content: flex-end;">
+                  <span style="font-size: 10.5px; color: #64748b;">版本:</span>
+                  <button type="button" class="bubble-ver-btn" id="bubble-btn-new-ver-down">-</button>
+                  <span id="bubble-new-ver-val" style="font-size: 11px; font-weight: 700; min-width: 14px; text-align: center;">1</span>
+                  <button type="button" class="bubble-ver-btn" id="bubble-btn-new-ver-up">+</button>
+                </div>
+              </div>
+              <!-- 记忆口令输入行 (同屏联动) -->
+              <div class="mantra-inline-unlock-header" style="margin-top: 2px;">
+                <span class="mantra-inline-title">🔑 记忆口令 (零存储)</span>
+                <span class="mantra-inline-canary" id="bubble-new-canary-badge">--------</span>
+              </div>
+              <div class="mantra-inline-input-wrap">
+                <input
+                  type="password"
+                  id="bubble-new-mantra"
+                  class="mantra-bubble-input"
+                  placeholder="${isUnlocked ? '已就绪 (可留空沿用，或输入新口令)...' : '输入记忆口令，回车派生并填入...'}"
+                  autocomplete="off"
+                />
+                <button type="button" class="mantra-bubble-btn-eye" id="bubble-new-eye">👁️</button>
+              </div>
+              <div style="display: flex; gap: 6px; margin-top: 4px;">
+                <button type="button" class="mantra-bubble-btn-unlock" id="bubble-btn-save-and-fill" style="flex: 2;">
+                  💾 保存账号并填充
+                </button>
+                <button type="button" class="mantra-bubble-header-btn" id="bubble-btn-quick-fill-only" style="flex: 1; padding: 6px 4px; font-weight: 600;">
+                  ⚡ 仅填入
+                </button>
+              </div>
+            </div>
+          `;
+        } else if (selectedAcc) {
+          // 选择旧记录详情模式：点击记录后展开详情，引导输入口令（若在15分钟内则直接就绪），再出现填入按钮
+          detailOrAddHtml = `
+            <div class="bubble-account-detail-box">
+              <div class="bubble-detail-meta-row">
+                <span class="bubble-detail-user">👤 选定: <strong>${selectedAcc.username}</strong></span>
+                <div class="bubble-ver-stepper">
+                  <span style="font-size: 10px; color: #64748b;">版本:</span>
+                  <button type="button" class="bubble-ver-btn" id="bubble-btn-acc-ver-down">-</button>
+                  <span id="bubble-acc-ver-val" style="font-size: 11px; font-weight: 700; min-width: 14px; text-align: center;">v${selectedAcc.version}</span>
+                  <button type="button" class="bubble-ver-btn" id="bubble-btn-acc-ver-up">+</button>
+                </div>
+              </div>
+              <div style="font-size: 10px; color: #64748b;">
+                规则: <span style="font-family: var(--mantra-font-mono);">${selectedAcc.rulePreset || 'standard-16'}</span>
+                ${selectedAcc.serviceKey ? ` · 标识: <strong>${selectedAcc.serviceKey}</strong>` : ''}
+              </div>
+              <!-- 口令状态与输入引导 -->
+              ${isUnlocked ? `
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; background: rgba(13, 148, 136, 0.1); border-radius: 6px; font-size: 10.5px; color: #0d9488;">
+                  <span>🟢 记忆口令已就绪 (15分钟有效)</span>
+                  <span class="mantra-inline-canary">${canaryText}</span>
+                </div>
+              ` : `
+                <div>
+                  <div class="mantra-inline-unlock-header">
+                    <span class="mantra-inline-title">🔑 输入记忆口令</span>
+                    <span class="mantra-inline-canary" id="bubble-old-canary-badge">--------</span>
+                  </div>
+                  <div class="mantra-inline-input-wrap">
+                    <input
+                      type="password"
+                      id="bubble-old-mantra"
+                      class="mantra-bubble-input"
+                      placeholder="输入记忆口令，回车即刻填入..."
+                      autocomplete="off"
+                    />
+                    <button type="button" class="mantra-bubble-btn-eye" id="bubble-old-eye">👁️</button>
+                  </div>
+                </div>
+              `}
+              <!-- 填入按钮 (展示详情后再出现) -->
+              <button type="button" class="mantra-bubble-btn-unlock" id="bubble-btn-fill-selected" style="margin-top: 4px;">
+                ⚡ 立即填入网页
+              </button>
+            </div>
+          `;
+        }
+
+        const bodyContainer = bubble.querySelector('#bubble-body-container');
+        if (bodyContainer) {
+          bodyContainer.innerHTML = `
+            ${accountsListHtml}
+            ${detailOrAddHtml}
+          `;
+          bindMainEvents();
+        }
+      }
+
+      async function renderManifestView() {
+        const bodyContainer = bubble.querySelector('#bubble-body-container');
+        if (!bodyContainer) return;
+
+        bodyContainer.innerHTML = `
+          <div class="bubble-manifest-view">
+            <div style="display: flex; gap: 6px; align-items: center;">
+              <button type="button" class="mantra-bubble-header-btn" id="bubble-btn-back-main" style="padding: 4px 8px; font-weight: 600;">
+                ← 返回
+              </button>
+              <input type="text" id="bubble-manifest-search" class="bubble-manifest-search-input" placeholder="搜索已保存的站点或账号..." />
+            </div>
+            <div id="bubble-manifest-items" style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
+              <div style="text-align: center; color: #94a3b8; font-size: 11px; padding: 12px;">加载账号清单中...</div>
+            </div>
+          </div>
+        `;
+
+        bubble.querySelector('#bubble-btn-back-main')?.addEventListener('click', () => {
+          currentView = 'main';
+          renderBubbleContent();
+        });
+
+        const manifestRes = await safeSendMessage<{ groups?: Array<{ domain: string; unicodeDomain: string; serviceKey?: string; accounts: any[] }> }>({
+          action: 'GET_ALL_MANIFEST'
+        }, 800);
+
+        const groups = manifestRes?.groups || [];
+        const itemsContainer = bubble.querySelector('#bubble-manifest-items');
+        if (!itemsContainer) return;
+
+        function renderGroupCards(filterText = '') {
+          if (!itemsContainer) return;
+          const query = filterText.trim().toLowerCase();
+          const filtered = groups.filter((g) => {
+            if (!query) return true;
+            return (
+              g.domain.toLowerCase().includes(query) ||
+              g.unicodeDomain.toLowerCase().includes(query) ||
+              (g.serviceKey && g.serviceKey.toLowerCase().includes(query)) ||
+              g.accounts.some((a) => a.username.toLowerCase().includes(query))
+            );
+          });
+
+          if (filtered.length === 0) {
+            itemsContainer.innerHTML = `
+              <div style="text-align: center; color: #94a3b8; font-size: 11px; padding: 10px;">
+                未搜索到匹配的站点记录
+              </div>
+            `;
+            return;
+          }
+
+          itemsContainer.innerHTML = filtered.map((g) => {
+            const isCurrent = g.domain.toLowerCase() === currentDomain.toLowerCase();
+            return `
+              <div class="bubble-manifest-group-card">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <div style="display: flex; align-items: center; gap: 5px; overflow: hidden;">
+                    <span style="font-size: 13px;">🌐</span>
+                    <span style="font-weight: 700; font-size: 11.5px; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${g.domain}">
+                      ${g.unicodeDomain}
+                    </span>
+                    ${g.serviceKey ? `<span style="font-size: 9px; background: rgba(13, 148, 136, 0.15); color: #0d9488; padding: 1px 4px; border-radius: 3px;">🏷️ ${g.serviceKey}</span>` : ''}
+                  </div>
+                  <div style="display: flex; gap: 4px; flex-shrink: 0;">
+                    ${!isCurrent ? `
+                      <button type="button" class="mantra-bubble-header-btn btn-link-this-group" data-domain="${g.domain}" data-name="${g.unicodeDomain}" style="padding: 2px 6px; color: #0d9488; border-color: #0d9488;" title="将当前网页关联为此站点的镜像">
+                        🔗 关联当前页
+                      </button>
+                    ` : '<span style="font-size: 9px; color: #0d9488; font-weight: 600;">当前站点</span>'}
+                  </div>
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                  ${g.accounts.map((a) => `
+                    <span style="font-size: 10px; background: #e2e8f0; color: #334155; padding: 1px 5px; border-radius: 3px;">
+                      ${a.username} (v${a.version})
+                    </span>
+                  `).join('')}
+                </div>
+              </div>
+            `;
+          }).join('');
+
+          // 绑定关联按钮
+          itemsContainer.querySelectorAll('.btn-link-this-group').forEach((btn) => {
+            btn.addEventListener('click', async (e) => {
+              e.stopPropagation();
+              const sourceDomain = (btn as HTMLElement).dataset.domain || '';
+              const sourceName = (btn as HTMLElement).dataset.name || sourceDomain;
+              if (!sourceDomain) return;
+
+              (btn as HTMLButtonElement).disabled = true;
+              (btn as HTMLButtonElement).textContent = '⏳ 关联中...';
+
+              const res = await safeSendMessage<{ status?: string; ok?: boolean }>({
+                action: 'LINK_DOMAIN',
+                payload: { targetDomain: currentDomain, sourceDomain }
+              }, 800);
+
+              if (res?.ok || res?.status === 'ok') {
+                showInPageToast(`🎉 成功将当前网页关联至 [${sourceName}]！`);
+                // 重新读取本站账号
+                const refreshed = await safeSendMessage<{ accounts?: any[] }>({
+                  action: 'GET_ACCOUNTS_FOR_DOMAIN',
+                  payload: { domain: currentDomain, title: document.title }
+                }, 600);
+                accounts = refreshed?.accounts || [];
+                selectedAccountIndex = 0;
+                isNewAccountMode = false;
+                currentView = 'main';
+                renderBubbleContent();
+              } else {
+                showInPageToast('❌ 关联失败');
+                (btn as HTMLButtonElement).disabled = false;
+                (btn as HTMLButtonElement).textContent = '🔗 关联当前页';
+              }
+            });
+          });
+        }
+
+        renderGroupCards('');
+
+        const searchInput = bubble.querySelector<HTMLInputElement>('#bubble-manifest-search');
+        searchInput?.addEventListener('input', () => {
+          renderGroupCards(searchInput.value);
+        });
+      }
+
+      function bindMainEvents() {
+        // 卡片点选切换选定账号
+        bubble.querySelectorAll('.mantra-card').forEach((card) => {
+          card.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const idx = parseInt((card as HTMLElement).dataset.idx || '0', 10);
+            selectedAccountIndex = idx;
+            isNewAccountMode = false;
+            renderMainView();
+          });
+        });
+
+        // 切换录入新账号
+        bubble.querySelector('#bubble-btn-toggle-add')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          isNewAccountMode = !isNewAccountMode;
+          renderMainView();
+        });
+
+        // 版本调整
+        let currentVer = accounts[selectedAccountIndex]?.version || 1;
+        const verValEl = bubble.querySelector('#bubble-acc-ver-val');
+        bubble.querySelector('#bubble-btn-acc-ver-down')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (currentVer > 1) {
+            currentVer--;
+            if (verValEl) verValEl.textContent = `v${currentVer}`;
+            if (accounts[selectedAccountIndex]) accounts[selectedAccountIndex].version = currentVer;
+          }
+        });
+        bubble.querySelector('#bubble-btn-acc-ver-up')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          currentVer++;
+          if (verValEl) verValEl.textContent = `v${currentVer}`;
+          if (accounts[selectedAccountIndex]) accounts[selectedAccountIndex].version = currentVer;
+        });
+
+        // 新增账号的版本调整
+        let newVer = 1;
+        const newVerValEl = bubble.querySelector('#bubble-new-ver-val');
+        bubble.querySelector('#bubble-btn-new-ver-down')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (newVer > 1) {
+            newVer--;
+            if (newVerValEl) newVerValEl.textContent = String(newVer);
+          }
+        });
+        bubble.querySelector('#bubble-btn-new-ver-up')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          newVer++;
+          if (newVerValEl) newVerValEl.textContent = String(newVer);
+        });
+
+        // 旧记录口令输入与明文切换
+        const oldMantraInput = bubble.querySelector<HTMLInputElement>('#bubble-old-mantra');
+        const oldCanaryBadge = bubble.querySelector<HTMLElement>('#bubble-old-canary-badge');
+        const oldEyeBtn = bubble.querySelector<HTMLButtonElement>('#bubble-old-eye');
+
+        if (oldMantraInput) {
+          setTimeout(() => oldMantraInput.focus(), 60);
+          oldMantraInput.addEventListener('input', async (e) => {
+            e.stopPropagation();
+            const val = oldMantraInput.value.trim();
+            if (val && oldCanaryBadge) {
+              oldCanaryBadge.textContent = await computeCanary(val);
+            } else if (oldCanaryBadge) {
+              oldCanaryBadge.textContent = '--------';
+            }
+          });
+          oldMantraInput.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+              bubble.querySelector<HTMLButtonElement>('#bubble-btn-fill-selected')?.click();
+            }
+          });
+        }
+
+        let isOldEyeOpen = false;
+        oldEyeBtn?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!oldMantraInput) return;
+          isOldEyeOpen = !isOldEyeOpen;
+          oldMantraInput.type = isOldEyeOpen ? 'text' : 'password';
+          oldEyeBtn.textContent = isOldEyeOpen ? '🔒' : '👁️';
+        });
+
+        // 选定账号的“填入网页”按钮点击事件
+        bubble.querySelector('#bubble-btn-fill-selected')?.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const targetAcc = accounts[selectedAccountIndex] || accounts[0];
+          if (!targetAcc) return;
+
+          let mantraToUse = '';
+          if (oldMantraInput && oldMantraInput.value.trim()) {
+            mantraToUse = oldMantraInput.value.trim();
+            // 顺带解锁后台 15 分钟会话
+            await safeSendMessage({ action: 'UNLOCK_SESSION', payload: { mantra: mantraToUse } }, 600);
+            isUnlocked = true;
+          }
+
+          chrome.runtime.sendMessage({
+            action: 'DERIVE_CREDENTIAL',
+            payload: {
+              domain: currentDomain,
+              serviceKey: targetAcc.serviceKey,
+              username: targetAcc.username,
+              version: targetAcc.version,
+              rule_preset: targetAcc.rulePreset,
+            },
+          }, (res) => {
+            const pwd = res?.data?.derived_password;
+            if (pwd) {
+              injectInputValue(anchorInput, pwd);
+              showInPageToast(`⚡ 已成功填入 [${targetAcc.username}] 强密码`);
+              closeBubble();
+            } else {
+              showInPageToast('❌ 派生失败: ' + (res?.message || '请先输入记忆口令'));
+              if (oldMantraInput) oldMantraInput.focus();
+            }
+          });
+        });
+
+        // 录入新账号保存并填充
+        const newMantraInput = bubble.querySelector<HTMLInputElement>('#bubble-new-mantra');
+        const newCanaryBadge = bubble.querySelector<HTMLElement>('#bubble-new-canary-badge');
+        const newEyeBtn = bubble.querySelector<HTMLButtonElement>('#bubble-new-eye');
+
+        if (newMantraInput) {
+          newMantraInput.addEventListener('input', async (e) => {
+            e.stopPropagation();
+            const val = newMantraInput.value.trim();
+            if (val && newCanaryBadge) {
+              newCanaryBadge.textContent = await computeCanary(val);
+            } else if (newCanaryBadge) {
+              newCanaryBadge.textContent = '--------';
+            }
+          });
+        }
+
+        let isNewEyeOpen = false;
+        newEyeBtn?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!newMantraInput) return;
+          isNewEyeOpen = !isNewEyeOpen;
+          newMantraInput.type = isNewEyeOpen ? 'text' : 'password';
+          newEyeBtn.textContent = isNewEyeOpen ? '🔒' : '👁️';
+        });
+
+        const doSaveAndFill = async (shouldSave = true) => {
+          const newUserInput = bubble.querySelector<HTMLInputElement>('#bubble-new-user');
+          const newRuleSelect = bubble.querySelector<HTMLSelectElement>('#bubble-new-rule');
+          const username = newUserInput?.value.trim() || '';
+
+          if (!username) {
+            showInPageToast('请输入账号名称');
+            newUserInput?.focus();
+            return;
+          }
+
+          const mantraVal = newMantraInput?.value.trim() || '';
+          if (mantraVal) {
+            await safeSendMessage({ action: 'UNLOCK_SESSION', payload: { mantra: mantraVal } }, 600);
+            isUnlocked = true;
+          }
+
+          const rulePreset = newRuleSelect?.value || 'standard-16';
+
+          chrome.runtime.sendMessage({
+            action: 'DERIVE_CREDENTIAL',
+            payload: {
+              domain: currentDomain,
+              username,
+              version: newVer,
+              rule_preset: rulePreset,
+            },
+          }, async (deriveRes) => {
+            const pwd = deriveRes?.data?.derived_password;
+            if (pwd) {
+              injectInputValue(anchorInput, pwd);
+              showInPageToast(`⚡ 已成功填入 [${username}] 密码`);
+
+              if (shouldSave) {
+                await safeSendMessage({
+                  action: 'SAVE_ACCOUNT',
+                  payload: {
+                    domain: currentDomain,
+                    account: {
+                      username,
+                      version: newVer,
+                      rulePreset,
+                      tag: 'Personal',
+                    },
+                  },
+                }, 600);
+              }
+              closeBubble();
+            } else {
+              showInPageToast('❌ 派生失败: ' + (deriveRes?.message || '请先输入记忆口令'));
+              if (newMantraInput) newMantraInput.focus();
+            }
+          });
+        };
+
+        bubble.querySelector('#bubble-btn-save-and-fill')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          doSaveAndFill(true);
+        });
+
+        bubble.querySelector('#bubble-btn-quick-fill-only')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          doSaveAndFill(false);
+        });
+      }
+
+      // 气泡骨架
       bubble.innerHTML = `
         <div class="mantra-bubble-header">
           <div class="mantra-bubble-domain-tag">
             <span class="mantra-domain-icon">${ICONS.lock}</span>
-            <span class="mantra-domain-title">${displayDomain}</span>
+            <span class="mantra-domain-title" id="bubble-domain-title">${displayDomain}</span>
+          </div>
+          <div class="mantra-bubble-header-actions">
+            <button type="button" class="mantra-bubble-header-btn" id="bubble-btn-manifest" title="查看所有站点账号清单">📋 记录清单</button>
+            <button type="button" class="mantra-bubble-header-btn" id="bubble-btn-link-site" title="关联当前网页到已有站点">🔗 关联</button>
           </div>
           <div class="mantra-session-status">
-            <span class="mantra-pulse-dot" style="${isUnlocked ? '' : 'background-color: #94a3b8; box-shadow: none;'}"></span>
-            <span>${isUnlocked ? '已就绪' : '待输入'}</span>
+            <span class="mantra-pulse-dot" id="bubble-pulse-dot" style="${isUnlocked ? '' : 'background-color: #94a3b8; box-shadow: none;'}"></span>
+            <span id="bubble-status-text">${isUnlocked ? '已就绪' : '待输入'}</span>
           </div>
         </div>
 
-        <div class="mantra-cards-list">
-          ${accountsHtml}
-        </div>
+        <div id="bubble-body-container" style="display: flex; flex-direction: column; gap: 6px; margin: 6px 0;"></div>
 
-        <div class="mantra-bubble-footer">
+        <div class="mantra-bubble-footer" id="bubble-footer">
           <div class="mantra-telemetry-item">
             <span>TTL: <span class="mantra-telemetry-highlight">${isUnlocked ? `${ttlMinutes}m` : '待就绪'}</span></span>
           </div>
@@ -363,177 +839,26 @@ export default defineContentScript({
         </div>
       `;
 
-      // 永远直接挂载到 body，彻底防止任意容器的 overflow: hidden 裁剪
+      // 挂载到 body
       document.body.appendChild(bubble);
       activeBubbleEl = bubble;
       updateBubblePosition();
 
-      // 阻止气泡内部点击冒泡到 document 触发关闭
-      bubble.addEventListener('click', (e) => e.stopPropagation());
-      bubble.addEventListener('mousedown', (e) => e.stopPropagation());
-
-      // 1. 就地解锁事件绑定
-      const bubbleInput = bubble.querySelector<HTMLInputElement>('#bubble-input-mantra');
-      const bubbleEye = bubble.querySelector<HTMLButtonElement>('#bubble-btn-eye');
-      const bubbleCanary = bubble.querySelector<HTMLElement>('#bubble-canary-badge');
-      const bubbleUnlockBtn = bubble.querySelector<HTMLButtonElement>('#bubble-btn-unlock');
-
-      if (bubbleInput && bubbleUnlockBtn) {
-        setTimeout(() => bubbleInput.focus(), 50);
-
-        bubbleInput.addEventListener('input', async (e) => {
-          e.stopPropagation();
-          const val = bubbleInput.value;
-          if (val && bubbleCanary) {
-            const canary = await computeCanary(val);
-            bubbleCanary.textContent = canary;
-          } else if (bubbleCanary) {
-            bubbleCanary.textContent = '--------';
-          }
-        });
-
-        bubbleInput.addEventListener('keydown', (e) => {
-          e.stopPropagation();
-          if (e.key === 'Enter') {
-            bubbleUnlockBtn.click();
-          }
-        });
-
-        let isEyeOpen = false;
-        bubbleEye?.addEventListener('click', (e) => {
-          e.stopPropagation();
-          isEyeOpen = !isEyeOpen;
-          bubbleInput.type = isEyeOpen ? 'text' : 'password';
-          bubbleEye.textContent = isEyeOpen ? '🔒' : '👁️';
-        });
-
-        bubbleUnlockBtn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          const val = bubbleInput.value.trim();
-          if (!val) {
-            showInPageToast('请输入记忆口令');
-            bubbleInput.focus();
-            return;
-          }
-
-          chrome.runtime.sendMessage({
-            action: 'UNLOCK_SESSION',
-            payload: { mantra: val },
-          }, async (res) => {
-            if (res?.status === 'ok') {
-              showInPageToast(`⚡ 记忆口令已就绪！金丝雀: [${res.session?.canary || ''}]`);
-              if (accounts.length > 0) {
-                const firstAcc = accounts[0];
-                chrome.runtime.sendMessage({
-                  action: 'DERIVE_CREDENTIAL',
-                  payload: {
-                    domain: currentDomain,
-                    username: firstAcc.username,
-                    version: firstAcc.version,
-                    rule_preset: firstAcc.rulePreset,
-                  },
-                }, (deriveRes) => {
-                  const pwd = deriveRes?.data?.derived_password;
-                  if (pwd) {
-                    injectInputValue(anchorInput, pwd);
-                    showInPageToast(`⚡ 已秒级填入 [${firstAcc.username}] 密码`);
-                    closeBubble();
-                  } else {
-                    renderAutofillBubble(anchorInput);
-                  }
-                });
-              } else {
-                renderAutofillBubble(anchorInput);
-              }
-            } else {
-              showInPageToast('❌ 生成失败: ' + (res?.message || '未知错误'));
-            }
-          });
-        });
-      }
-
-      // 2. 无账号时就地快速录入并填充绑定
-      const quickUser = bubble.querySelector<HTMLInputElement>('#bubble-quick-user');
-      const quickBtn = bubble.querySelector<HTMLButtonElement>('#bubble-quick-fill-btn');
-      if (quickUser && quickBtn) {
-        setTimeout(() => quickUser.focus(), 50);
-
-        const triggerQuickFill = () => {
-          const user = quickUser.value.trim() || 'default';
-          chrome.runtime.sendMessage({
-            action: 'DERIVE_CREDENTIAL',
-            payload: {
-              domain: currentDomain,
-              username: user,
-              version: 1,
-              rule_preset: 'standard-16',
-            },
-          }, (deriveRes) => {
-            const pwd = deriveRes?.data?.derived_password;
-            if (pwd) {
-              injectInputValue(anchorInput, pwd);
-              showInPageToast(`⚡ 已派生并填入 [${user}] 强密码`);
-              chrome.runtime.sendMessage({
-                action: 'SAVE_ACCOUNT',
-                payload: {
-                  domain: currentDomain,
-                  account: {
-                    username: user,
-                    version: 1,
-                    rulePreset: 'standard-16',
-                    tag: 'Personal',
-                  },
-                },
-              });
-              closeBubble();
-            }
-          });
-        };
-
-        quickBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          triggerQuickFill();
-        });
-
-        quickUser.addEventListener('keydown', (e) => {
-          e.stopPropagation();
-          if (e.key === 'Enter') {
-            triggerQuickFill();
-          }
-        });
-      }
-
-      // 绑定卡片点选填充事件
-      const cardEls = bubble.querySelectorAll<HTMLElement>('.mantra-card');
-      cardEls.forEach((card) => {
-        card.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const user = card.dataset.user;
-          const ver = parseInt(card.dataset.version || '1', 10);
-          const rule = card.dataset.rule || 'standard-16';
-
-          if (!user) return;
-
-          chrome.runtime.sendMessage({
-            action: 'DERIVE_CREDENTIAL',
-            payload: {
-              domain: currentDomain,
-              username: user,
-              version: ver,
-              rule_preset: rule,
-            },
-          }, (res) => {
-            const pwd = res?.data?.derived_password;
-            if (pwd) {
-              injectInputValue(anchorInput, pwd);
-              showInPageToast(`⚡ 已成功派生并填入 [${user}] 强密码`);
-              closeBubble();
-            } else {
-              showInPageToast('❌ 派生失败: ' + (res?.message || '未知错误'));
-            }
-          });
-        });
+      // 绑定顶栏快捷按钮
+      bubble.querySelector('#bubble-btn-manifest')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        currentView = currentView === 'manifest' ? 'main' : 'manifest';
+        renderBubbleContent();
       });
+
+      bubble.querySelector('#bubble-btn-link-site')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        currentView = 'manifest';
+        renderBubbleContent();
+      });
+
+      // 首次渲染主视图
+      renderBubbleContent();
     }
 
     /**

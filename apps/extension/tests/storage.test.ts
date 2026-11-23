@@ -82,12 +82,22 @@ test('getAllAccountsManifest 与 linkDomainToExisting 关联测试', async () =>
   assert.ok(found);
   assert.strictEqual(found.accounts[0].username, 'sanmao_user@gmail.com');
 
+  // 先模拟在镜像域名上存在一个未关联的错误旧记录 (serviceKey 为空，version 为 99)
+  await saveAccountForDomain('new-flight-gw.org', {
+    username: 'sanmao_user@gmail.com',
+    version: 99,
+    rulePreset: 'alphanumeric-16',
+  });
+
   // 测试手动将新域名关联到已有服务
   const linked = await linkDomainToExisting('new-flight-gw.org', '三毛机场.com');
   assert.strictEqual(linked, true);
 
-  // 再次查询新域名
+  // 再次查询新域名：验证旧错误记录被覆写，serviceKey 成功对齐为 '三毛机场'，且版本同步对齐
   const resLinked = await getAccountsForDomain('new-flight-gw.org');
   assert.strictEqual(resLinked.length, 1);
   assert.strictEqual(resLinked[0].username, 'sanmao_user@gmail.com');
+  assert.strictEqual(resLinked[0].serviceKey, '三毛机场');
+  assert.strictEqual(resLinked[0].version, 1);
+  assert.strictEqual(resLinked[0].rulePreset, 'standard-16');
 });

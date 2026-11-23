@@ -18,6 +18,7 @@ import {
   updateAccountVersion,
   getAllAccountsManifest,
   linkDomainToExisting,
+  type AccountRecord,
 } from '../../utils/storage';
 import {
   getWebDAVConfig,
@@ -27,15 +28,19 @@ import {
   performWebDAVSync,
   exportLocalManifest,
   importMergedManifest,
+  normalizeWebDAVUrl,
   type WebDAVConfig,
 } from '../../utils/webdav';
+import { checkExtensionUpdate } from '../../utils/update';
 
 document.addEventListener('DOMContentLoaded', async () => {
   // DOM 元素引用
   const btnToggleTheme = document.getElementById('btn-toggle-theme') as HTMLButtonElement | null;
 
-  const viewLocked = document.getElementById('view-locked') as HTMLElement;
-  const viewUnlocked = document.getElementById('view-unlocked') as HTMLElement;
+  // 扩展自动更新提醒条
+  const updateBanner = document.getElementById('update-banner') as HTMLElement | null;
+  const updateBannerText = document.getElementById('update-banner-text') as HTMLElement | null;
+  const btnDownloadUpdate = document.getElementById('btn-download-update') as HTMLButtonElement | null;
 
   const headerCanaryChip = document.getElementById('header-canary-chip') as HTMLElement;
   const headerCanaryText = document.getElementById('header-canary-text') as HTMLElement;
@@ -45,11 +50,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   const sessionTtlText = document.getElementById('session-ttl-text') as HTMLElement;
   const btnLockSession = document.getElementById('btn-lock-session') as HTMLButtonElement;
 
-  // 锁定视图元素
+  // 记忆口令与防手抖元素
   const inputMasterMantra = document.getElementById('input-master-mantra') as HTMLInputElement;
   const btnToggleMantraEye = document.getElementById('btn-toggle-mantra-eye') as HTMLButtonElement;
   const canaryPreviewHex = document.getElementById('canary-preview-hex') as HTMLElement;
-  const btnUnlockSubmit = document.getElementById('btn-unlock-submit') as HTMLButtonElement;
+  const sessionActiveHint = document.getElementById('session-active-hint') as HTMLElement | null;
   const codeQuickSample = document.getElementById('code-quick-sample') as HTMLElement | null;
 
   // 解锁视图元素
@@ -235,8 +240,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   function updateSessionView() {
     if (isUnlocked && activeMantra) {
       document.body.classList.add('is-unlocked');
-      viewLocked.style.display = 'none';
-      viewUnlocked.style.display = 'flex';
       sessionDot.classList.remove('locked');
       if (sessionStatusPill) {
         sessionStatusPill.classList.remove('locked');
@@ -253,13 +256,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       const secs = ttlRemaining % 60;
       sessionTtlText.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
       if (linkClearAllDomain) linkClearAllDomain.style.display = 'inline';
+
+      if (sessionActiveHint) sessionActiveHint.style.display = 'block';
+      if (!inputMasterMantra.value) {
+        inputMasterMantra.placeholder = '已就绪 (可留空沿用，或输入新口令覆盖)...';
+        canaryPreviewHex.textContent = activeCanary || '--------';
+      }
+
       startTtlTimer();
-      loadDomainAccounts();
       updateNewPwdPreview();
     } else {
       document.body.classList.remove('is-unlocked');
-      viewLocked.style.display = 'flex';
-      viewUnlocked.style.display = 'none';
       headerCanaryChip.style.display = 'none';
       if (linkClearAllDomain) linkClearAllDomain.style.display = 'none';
       sessionDot.classList.add('locked');
@@ -269,12 +276,39 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       sessionTtlText.textContent = '待输入';
       btnLockSession.style.display = 'none';
+      if (sessionActiveHint) sessionActiveHint.style.display = 'none';
+      if (!inputMasterMantra.value) {
+        inputMasterMantra.placeholder = '输入记忆口令...';
+        canaryPreviewHex.textContent = '--------';
+      }
       if (ttlTimer) {
         clearInterval(ttlTimer);
         ttlTimer = null;
       }
-      loadDomainAccounts();
+      updateNewPwdPreview();
     }
+  }
+
+  /**
+   * 获取当前生效的记忆口令 (优先采用输入框即时输入，若输入框为空则沿用有效会话)
+   */
+  async function getEffectiveMantra(): Promise<string> {
+    const inputVal = inputMasterMantra.value.trim();
+    if (inputVal) {
+      if (inputVal !== activeMantra) {
+        const state = await unlockSession(inputVal, 900);
+        isUnlocked = true;
+        activeMantra = state.mantra;
+        activeCanary = state.canary;
+        ttlRemaining = state.ttlRemaining || 900;
+        updateSessionView();
+      }
+      return inputVal;
+    }
+    if (activeMantra) {
+      return activeMantra;
+    }
+    return '';
   }
 
   /**
@@ -296,7 +330,8 @@ document.addEventListener('DOMContentLoaded', async () => {
    * 动态实时派生快速录入区的密码预览
    */
   async function updateNewPwdPreview() {
-    if (!isUnlocked || !activeMantra) {
+    const currentMantra = inputMasterMantra.value.trim() || activeMantra;
+    if (!currentMantra) {
       newPwdPreview.textContent = '••••••••••••••••';
       currentDerivedPreview = '';
       return;
@@ -309,7 +344,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const derivationBase = serviceKey || currentDomain;
 
     try {
-      const derived = await deriveSitePassword(activeMantra, derivationBase, username, version, rule);
+      const derived = await deriveSitePassword(currentMantra, derivationBase, username, version, rule);
       currentDerivedPreview = derived;
       if (isPreviewPeek) {
         newPwdPreview.textContent = derived;
@@ -319,6 +354,42 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (e) {
       console.warn('预览派生异常:', e);
     }
+  }
+
+  let selectedAccount: AccountRecord | null = null;
+
+  function applySelectedAccount(acc: AccountRecord) {
+    selectedAccount = acc;
+    deriveCardTitle.textContent = `📌 账号详情与生成: ${acc.username}`;
+    newAccUser.value = acc.username;
+    if (newAccService) {
+      newAccService.value = acc.serviceKey || '';
+    }
+    if (newAccRule) {
+      newAccRule.value = acc.rulePreset || 'standard-16';
+    }
+    newAccVer.value = String(acc.version || 1);
+    btnActionAutofill.textContent = '⚡ 填入网页';
+    btnActionSave.textContent = '💾 保存修改并填入';
+    updateNewPwdPreview();
+  }
+
+  function applyNewAccountMode() {
+    selectedAccount = null;
+    accountListEl.querySelectorAll('.account-item').forEach((el) => el.classList.remove('active'));
+    deriveCardTitle.textContent = '⚡ 录入新账号与派生';
+    newAccUser.value = '';
+    if (newAccService) {
+      newAccService.value = currentDomain;
+    }
+    if (newAccRule) {
+      newAccRule.value = 'standard-16';
+    }
+    newAccVer.value = '1';
+    btnActionAutofill.textContent = '⚡ 仅派生填入';
+    btnActionSave.textContent = '💾 保存账号并填充';
+    newAccUser.focus();
+    updateNewPwdPreview();
   }
 
   /**
@@ -331,7 +402,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 账号区域常驻展示，杜绝无清单界面的情况
     accountsSection.style.display = 'flex';
-    deriveCardTitle.textContent = '⚡ 录入新账号';
 
     if (accounts.length === 0) {
       accountListEl.innerHTML = `
@@ -351,12 +421,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       `;
 
       accountListEl.querySelector('#btn-empty-quick-add')?.addEventListener('click', () => {
-        addAccountCard.scrollIntoView({ behavior: 'smooth' });
-        newAccUser.focus();
+        applyNewAccountMode();
       });
       accountListEl.querySelector('#btn-empty-open-manifest')?.addEventListener('click', () => {
         openManifestModal();
       });
+      applyNewAccountMode();
       return;
     }
 
@@ -365,7 +435,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     for (let i = 0; i < accounts.length; i++) {
       const acc = accounts[i];
       const itemEl = document.createElement('div');
-      itemEl.className = 'account-item';
+      itemEl.className = 'account-item' + (i === 0 ? ' active' : '');
       itemEl.dataset.username = acc.username;
 
       let accountPwd = '';
@@ -407,32 +477,65 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
       `;
 
-      itemEl.querySelector('.btn-item-autofill')?.addEventListener('click', (e) => {
-        e.stopPropagation();
+      // 点击整个卡片项：选定该账号，并在下方展示详情
+      itemEl.addEventListener('click', () => {
+        accountListEl.querySelectorAll('.account-item').forEach((el) => el.classList.remove('active'));
+        itemEl.classList.add('active');
+        applySelectedAccount(acc);
         if (!activeMantra) {
+          inputMasterMantra.focus();
+        }
+      });
+
+      // 填充快捷按钮
+      itemEl.querySelector('.btn-item-autofill')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        accountListEl.querySelectorAll('.account-item').forEach((el) => el.classList.remove('active'));
+        itemEl.classList.add('active');
+        applySelectedAccount(acc);
+
+        const mantra = await getEffectiveMantra();
+        if (!mantra) {
           inputMasterMantra.focus();
           showToast('请先输入记忆口令以实时生成强密码');
           return;
         }
+
+        const pwd = await deriveSitePassword(
+          mantra,
+          derivationBase,
+          acc.username,
+          acc.version,
+          acc.rulePreset
+        );
+
         chrome.runtime.sendMessage({
           action: 'AUTOFILL_ACTIVE_TAB',
           payload: {
             username: acc.username,
-            password: accountPwd,
+            password: pwd,
           },
         }, () => {
           showToast(`已向网页填入 [${acc.username}] 与强密码`);
         });
       });
 
-      itemEl.querySelector('.btn-item-copy')?.addEventListener('click', (e) => {
+      itemEl.querySelector('.btn-item-copy')?.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!activeMantra) {
+        const mantra = await getEffectiveMantra();
+        if (!mantra) {
           inputMasterMantra.focus();
           showToast('请先输入记忆口令以实时生成强密码');
           return;
         }
-        copyToClipboard(accountPwd, acc.username);
+        const pwd = await deriveSitePassword(
+          mantra,
+          derivationBase,
+          acc.username,
+          acc.version,
+          acc.rulePreset
+        );
+        copyToClipboard(pwd, acc.username);
       });
 
       itemEl.querySelector('.btn-item-ver-down')?.addEventListener('click', async (e) => {
@@ -462,6 +565,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
 
       accountListEl.appendChild(itemEl);
+    }
+
+    // 默认展示第一个账号的详情与生成界面
+    if (accounts.length > 0) {
+      applySelectedAccount(accounts[0]);
     }
   }
 
@@ -494,20 +602,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   updateSessionView();
 
-  // 3. 主口令输入事件：实时金丝雀哈希指纹计算
+  // 3. 记忆口令输入事件：实时金丝雀指纹计算与密码预览联动
   inputMasterMantra.addEventListener('input', async () => {
-    const val = inputMasterMantra.value;
+    const val = inputMasterMantra.value.trim();
     if (val) {
       const canary = await computeCanary(val);
       canaryPreviewHex.textContent = canary;
+    } else if (activeMantra) {
+      canaryPreviewHex.textContent = activeCanary || await computeCanary(activeMantra);
     } else {
       canaryPreviewHex.textContent = '--------';
     }
+    updateNewPwdPreview();
   });
 
   inputMasterMantra.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
-      btnUnlockSubmit.click();
+      btnActionAutofill.click();
     }
   });
 
@@ -519,23 +630,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnToggleMantraEye.title = isMantraPeek ? '点击隐藏口令' : '点击显示明文';
   });
 
-  // 5. 解锁按钮
-  btnUnlockSubmit.addEventListener('click', async () => {
-    const val = inputMasterMantra.value.trim();
-    if (!val) {
-      showToast('请输入有效的记忆口令');
-      inputMasterMantra.focus();
-      return;
+  // 5. 检查插件在线版本更新
+  checkExtensionUpdate().then((info) => {
+    if (info?.hasUpdate && updateBanner && updateBannerText && btnDownloadUpdate) {
+      updateBanner.style.display = 'flex';
+      updateBannerText.textContent = `🚀 密诀新版本 v${info.latestVersion} 可用！`;
+      btnDownloadUpdate.onclick = () => {
+        chrome.tabs.create({ url: info.acceleratedDownloadUrl });
+        showToast('🎉 开始下载更新包！解压覆盖插件目录并在扩展管理页刷新即可');
+      };
     }
-
-    const state = await unlockSession(val, 900);
-    isUnlocked = true;
-    activeMantra = state.mantra;
-    activeCanary = state.canary;
-    ttlRemaining = state.ttlRemaining;
-    updateSessionView();
-    showToast(`记忆口令已就绪！金丝雀: [${state.canary}]`);
-  });
+  }).catch(() => {});
 
   // 6. 快捷示例填充 (若存在)
   codeQuickSample?.addEventListener('click', async () => {
@@ -578,6 +683,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 9. 展开录入新账号
   btnToggleAddSection.addEventListener('click', () => {
+    applyNewAccountMode();
     addAccountCard.scrollIntoView({ behavior: 'smooth' });
     newAccUser.focus();
   });
@@ -606,11 +712,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateNewPwdPreview();
   });
 
-  // 11. 一键填充到网页
+  // 11. 填入网页
   btnActionAutofill.addEventListener('click', async () => {
+    const mantra = await getEffectiveMantra();
+    if (!mantra) {
+      inputMasterMantra.focus();
+      showToast('🔑 请先输入记忆口令以生成强密码');
+      return;
+    }
     const user = newAccUser.value.trim();
+    await updateNewPwdPreview();
     if (!currentDerivedPreview) {
-      await updateNewPwdPreview();
+      showToast('生成密码失败');
+      return;
     }
     chrome.runtime.sendMessage({
       action: 'AUTOFILL_ACTIVE_TAB',
@@ -619,7 +733,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         password: currentDerivedPreview,
       },
     }, () => {
-      showToast('⚡ 已一键填入网页！');
+      showToast(`⚡ 已向网页填入 [${user || '账号'}] 与强密码！`);
     });
   });
 
@@ -629,6 +743,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!user) {
       showToast('请输入账号或用户名');
       newAccUser.focus();
+      return;
+    }
+
+    const mantra = await getEffectiveMantra();
+    if (!mantra) {
+      inputMasterMantra.focus();
+      showToast('🔑 请先输入记忆口令以生成强密码');
       return;
     }
 
@@ -647,9 +768,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       tag: serviceKey ? `服务: ${serviceKey}` : 'Personal',
     });
 
-    if (!currentDerivedPreview) {
-      await updateNewPwdPreview();
-    }
+    await updateNewPwdPreview();
 
     chrome.runtime.sendMessage({
       action: 'AUTOFILL_ACTIVE_TAB',
@@ -659,8 +778,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       },
     });
 
-    loadDomainAccounts();
-    showToast(`已保存账号 [${user}] 并填充到当前网页！`);
+    await loadDomainAccounts();
+    showToast(`已保存账号 [${user}] 并填入当前网页！`);
   });
 
   // 13. 复制密码
@@ -699,6 +818,58 @@ document.addEventListener('DOMContentLoaded', async () => {
   const syncInputUser = document.getElementById('sync-input-user') as HTMLInputElement | null;
   const syncInputPass = document.getElementById('sync-input-pass') as HTMLInputElement | null;
   const syncInputFile = document.getElementById('sync-input-file') as HTMLInputElement | null;
+  const syncInputSyncPass = document.getElementById('sync-input-sync-pass') as HTMLInputElement | null;
+  const btnToggleSyncPass = document.getElementById('btn-toggle-sync-pass') as HTMLButtonElement | null;
+
+  let isSyncPassPeek = false;
+  btnToggleSyncPass?.addEventListener('click', () => {
+    isSyncPassPeek = !isSyncPassPeek;
+    if (syncInputSyncPass) {
+      syncInputSyncPass.type = isSyncPassPeek ? 'text' : 'password';
+    }
+    if (btnToggleSyncPass) {
+      btnToggleSyncPass.textContent = isSyncPassPeek ? '🔒 隐藏' : '👁️ 显示';
+    }
+  });
+
+  function promptSyncPasswordModal(): Promise<string | null> {
+    return new Promise((resolve) => {
+      const modal = document.getElementById('sync-pass-modal-overlay');
+      const input = document.getElementById('modal-sync-pass-input') as HTMLInputElement | null;
+      const btnConfirm = document.getElementById('btn-confirm-modal-sync-pass');
+      const btnCancel = document.getElementById('btn-cancel-modal-sync-pass');
+
+      if (!modal || !input || !btnConfirm || !btnCancel) {
+        const val = prompt('检测到云端备份已启用端到端加密，请输入「同步加密密码」以解锁合并：');
+        resolve(val ? val.trim() : null);
+        return;
+      }
+
+      input.value = '';
+      modal.style.display = 'flex';
+      input.focus();
+
+      const cleanup = () => {
+        modal.style.display = 'none';
+        btnConfirm.removeEventListener('click', onConfirm);
+        btnCancel.removeEventListener('click', onCancel);
+      };
+
+      const onConfirm = () => {
+        const val = input.value.trim();
+        cleanup();
+        resolve(val || null);
+      };
+
+      const onCancel = () => {
+        cleanup();
+        resolve(null);
+      };
+
+      btnConfirm.addEventListener('click', onConfirm);
+      btnCancel.addEventListener('click', onCancel);
+    });
+  }
 
   const btnPopupTestSync = document.getElementById('btn-popup-test-sync') as HTMLButtonElement | null;
   const btnPopupSaveSync = document.getElementById('btn-popup-save-sync') as HTMLButtonElement | null;
@@ -817,10 +988,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const cfg = await getWebDAVConfig();
     const info = await getSyncStatus();
 
-    if (syncInputUrl && !syncInputUrl.value) syncInputUrl.value = cfg.serverUrl || '';
+    if (syncInputUrl && !syncInputUrl.value) syncInputUrl.value = cfg.serverUrl || 'https://dav.jianguoyun.com/dav/mantra-key';
     if (syncInputUser && !syncInputUser.value) syncInputUser.value = cfg.username || '';
     if (syncInputPass && !syncInputPass.value) syncInputPass.value = cfg.password || '';
     if (syncInputFile && !syncInputFile.value) syncInputFile.value = cfg.remoteFileName || 'mantra_sync.mkey';
+    if (syncInputSyncPass && !syncInputSyncPass.value) syncInputSyncPass.value = cfg.syncPassword || '';
 
     if (popupSyncTimeText) {
       popupSyncTimeText.textContent = info.lastSyncTime ? `上次同步: ${info.lastSyncTime}` : '上次同步: 尚未同步';
@@ -840,12 +1012,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  // 失去焦点时自动智能补全坚果云二级目录 /mantra-key
+  syncInputUrl?.addEventListener('blur', () => {
+    if (syncInputUrl.value) {
+      syncInputUrl.value = normalizeWebDAVUrl(syncInputUrl.value);
+    }
+  });
+
   btnPopupSaveSync?.addEventListener('click', async () => {
     const currentCfg: WebDAVConfig = {
-      serverUrl: syncInputUrl?.value?.trim() || '',
+      serverUrl: normalizeWebDAVUrl(syncInputUrl?.value?.trim() || ''),
       username: syncInputUser?.value?.trim() || '',
       password: syncInputPass?.value?.trim() || '',
-      remoteFileName: syncInputFile?.value?.trim() || 'mantra_sync.mkey'
+      remoteFileName: syncInputFile?.value?.trim() || 'mantra_sync.mkey',
+      syncPassword: syncInputSyncPass?.value?.trim() || undefined
     };
     if (btnPopupSaveSync) {
       btnPopupSaveSync.textContent = '⏳ 保存中...';
@@ -877,7 +1057,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       serverUrl: syncInputUrl?.value?.trim() || '',
       username: syncInputUser?.value?.trim() || '',
       password: syncInputPass?.value?.trim() || '',
-      remoteFileName: syncInputFile?.value?.trim() || 'mantra_sync.mkey'
+      remoteFileName: syncInputFile?.value?.trim() || 'mantra_sync.mkey',
+      syncPassword: syncInputSyncPass?.value?.trim() || undefined
     };
     if (!currentCfg.serverUrl) {
       showToast('⚠️ 请先填写 WebDAV 服务器地址');
@@ -916,17 +1097,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   btnPopupDoSync?.addEventListener('click', async () => {
-    const session = await getSessionState();
-    if (!session.isUnlocked || !session.mantra) {
-      showToast('⚠️ 请先输入记忆口令，端到端加密需要口令作为主密钥');
-      return;
-    }
-
     const currentCfg: WebDAVConfig = {
       serverUrl: syncInputUrl?.value?.trim() || '',
       username: syncInputUser?.value?.trim() || '',
       password: syncInputPass?.value?.trim() || '',
-      remoteFileName: syncInputFile?.value?.trim() || 'mantra_sync.mkey'
+      remoteFileName: syncInputFile?.value?.trim() || 'mantra_sync.mkey',
+      syncPassword: syncInputSyncPass?.value?.trim() || undefined
     };
 
     if (!currentCfg.serverUrl) {
@@ -945,7 +1121,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     try {
-      const res = await performWebDAVSync(session.mantra, currentCfg);
+      const res = await performWebDAVSync(currentCfg, promptSyncPasswordModal);
+      if (currentCfg.syncPassword && syncInputSyncPass) {
+        syncInputSyncPass.value = currentCfg.syncPassword;
+      }
       await refreshSyncView();
       await loadDomainAccounts();
       showToast(res.ok ? `🎉 ${res.message}` : `⚠️ 同步未完成: ${res.message}`, 3000);
@@ -1054,8 +1233,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 🔗 关联当前网页
               </button>
             ` : ''}
-            <button type="button" class="btn-switch-domain btn-xs-muted" style="padding: 3px 8px; font-size: 10.5px; cursor: pointer;" title="在面板中切换管理此站点">
-              切换管理
+            <button type="button" class="btn-switch-domain btn-xs-muted" style="padding: 3px 8px; font-size: 10.5px; cursor: pointer;" title="在面板中设为当前站点并管理账号">
+              🎯 设为当前站点
             </button>
           </div>
         </div>
@@ -1098,9 +1277,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         row.querySelector('.btn-manifest-autofill')?.addEventListener('click', async (e) => {
           e.stopPropagation();
           if (!activeMantra) {
+            currentDomain = group.domain;
+            currentDomainText.textContent = toUnicodeDomain(currentDomain);
+            currentDomainText.title = currentDomain;
+            await loadDomainAccounts();
+            applySelectedAccount(acc);
             closeManifestModal();
             inputMasterMantra.focus();
-            showToast('请先输入记忆口令以实时生成强密码');
+            showToast('请在此输入记忆口令，输入即刻派生填入！');
             return;
           }
           const derivationBase = acc.serviceKey || group.domain;
