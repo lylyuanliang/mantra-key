@@ -60,6 +60,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const codeQuickSample = document.getElementById('code-quick-sample') as HTMLElement | null;
 
   // 解锁视图元素
+  const currentDomainTitleRow = document.getElementById('current-domain-title-row') as HTMLElement | null;
   const currentDomainText = document.getElementById('current-domain-text') as HTMLElement;
   const currentDomainAlias = document.getElementById('current-domain-alias') as HTMLElement | null;
   const btnEditCurrentAlias = document.getElementById('btn-edit-current-alias') as HTMLButtonElement | null;
@@ -306,6 +307,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         activeCanary = state.canary;
         ttlRemaining = state.ttlRemaining || 900;
         updateSessionView();
+  await loadDomainAccounts();
       }
       return inputVal;
     }
@@ -327,6 +329,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     inputMasterMantra.value = '';
     canaryPreviewHex.textContent = '--------';
     updateSessionView();
+  await loadDomainAccounts();
     showToast('口令已清空，内存已物理清零');
   }
 
@@ -520,6 +523,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             password: pwd,
           },
         }, () => {
+          const _err = chrome.runtime.lastError;
           showToast(`已向网页填入 [${acc.username}] 与强密码`);
         });
       });
@@ -579,12 +583,119 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ================= 初始加载与事件监听 =================
 
+  function startInlineAliasEdit(
+    container: HTMLElement,
+    targetDomain: string,
+    initialVal: string,
+    onSaveSuccess: () => Promise<void>,
+    onCancel?: () => void
+  ) {
+    const originalHtml = container.innerHTML;
+    container.innerHTML = `
+      <div class="inline-alias-wrapper" style="width: 100%; display: flex; align-items: center; gap: 4px;">
+        <input type="text" class="inline-alias-input" value="${initialVal.replace(/"/g, '&quot;')}" placeholder="输入站点别名" style="flex: 1; min-width: 80px;" />
+        <button type="button" class="btn-inline-alias-save" title="保存修改 (Enter)">✓</button>
+        <button type="button" class="btn-inline-alias-cancel" title="取消 (Esc)">✕</button>
+      </div>
+    `;
+
+    const input = container.querySelector('.inline-alias-input') as HTMLInputElement | null;
+    const btnSave = container.querySelector('.btn-inline-alias-save') as HTMLButtonElement | null;
+    const btnCancel = container.querySelector('.btn-inline-alias-cancel') as HTMLButtonElement | null;
+
+    if (!input) return;
+
+    input.focus();
+    input.select();
+
+    let isFinished = false;
+
+    const doSave = async () => {
+      if (isFinished) return;
+      isFinished = true;
+      const newAlias = input.value.trim();
+      await setDomainDisplayName(targetDomain, newAlias);
+      showToast(newAlias ? `已保存站点备注 [${newAlias}]` : '已恢复默认站点域名');
+      await onSaveSuccess();
+    };
+
+    const doCancel = () => {
+      if (isFinished) return;
+      isFinished = true;
+      if (onCancel) {
+        onCancel();
+      } else {
+        container.innerHTML = originalHtml;
+      }
+    };
+
+    btnSave?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      doSave();
+    });
+
+    btnCancel?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      doCancel();
+    });
+
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        doSave();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        doCancel();
+      }
+    });
+
+    input.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+  }
+
+  async function triggerMainDomainInlineEdit() {
+    if (!currentDomainTitleRow) return;
+    const curName = (await getDomainDisplayName(currentDomain)) || toUnicodeDomain(currentDomain);
+    startInlineAliasEdit(
+      currentDomainTitleRow,
+      currentDomain,
+      curName,
+      async () => {
+        await refreshCurrentDomainDisplay();
+        if (manifestModalOverlay && manifestModalOverlay.style.display !== 'none') {
+          await renderAllManifest(inputSearchManifest?.value || '');
+        }
+      },
+      () => {
+        refreshCurrentDomainDisplay();
+      }
+    );
+  }
+
   async function refreshCurrentDomainDisplay() {
     const unicode = toUnicodeDomain(currentDomain);
-    currentDomainText.textContent = unicode;
-    currentDomainText.title = currentDomain;
-
     const displayName = await getDomainDisplayName(currentDomain);
+
+    if (currentDomainTitleRow) {
+      currentDomainTitleRow.innerHTML = `
+        <span class="domain-name" id="current-domain-text" title="${currentDomain}">${unicode}</span>
+        <button type="button" id="btn-edit-current-alias" title="设置/修改站点别名" style="border: none; background: transparent; cursor: pointer; font-size: 11px; padding: 0 2px; opacity: 0.6; transition: opacity 0.15s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'">✏️</button>
+      `;
+      currentDomainTitleRow.querySelector('#btn-edit-current-alias')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        triggerMainDomainInlineEdit();
+      });
+      currentDomainTitleRow.querySelector('#current-domain-text')?.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        triggerMainDomainInlineEdit();
+      });
+    } else {
+      currentDomainText.textContent = unicode;
+      currentDomainText.title = currentDomain;
+    }
+
     if (displayName && displayName !== unicode && displayName !== currentDomain) {
       if (currentDomainAlias) {
         currentDomainAlias.textContent = `🏷️ ${displayName}`;
@@ -622,6 +733,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     ttlRemaining = session.ttlRemaining;
   }
   updateSessionView();
+  await loadDomainAccounts();
 
   // 3. 记忆口令输入事件：实时金丝雀指纹计算与密码预览联动
   inputMasterMantra.addEventListener('input', async () => {
@@ -766,6 +878,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         password: currentDerivedPreview,
       },
     }, () => {
+      const _err = chrome.runtime.lastError;
       showToast(`⚡ 已向网页填入 [${user || '账号'}] 与强密码！`);
     });
   });
@@ -809,6 +922,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         username: user,
         password: currentDerivedPreview,
       },
+    }, () => {
+      const _err = chrome.runtime.lastError;
     });
 
     await loadDomainAccounts();
@@ -1172,66 +1287,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // 17. 站点自定义别名修改模态弹窗交互
-  const aliasModalOverlay = document.getElementById('alias-modal-overlay');
-  const aliasModalDomainDesc = document.getElementById('alias-modal-domain-desc');
-  const inputSiteAlias = document.getElementById('input-site-alias') as HTMLInputElement | null;
-  const btnSaveSiteAlias = document.getElementById('btn-save-site-alias');
-  const btnCancelSiteAlias = document.getElementById('btn-cancel-site-alias');
-  let currentAliasTargetDomain = '';
-
-  function openAliasModal(domain: string, initialAlias: string = '') {
-    currentAliasTargetDomain = domain;
-    if (aliasModalDomainDesc) {
-      aliasModalDomainDesc.textContent = `为站点 [${toUnicodeDomain(domain)}] 设置自定义别名（便于随时识别）：`;
-    }
-    if (inputSiteAlias) {
-      inputSiteAlias.value = initialAlias || '';
-    }
-    if (aliasModalOverlay) {
-      aliasModalOverlay.style.display = 'flex';
-      setTimeout(() => inputSiteAlias?.focus(), 50);
-    }
-  }
-
-  function closeAliasModal() {
-    if (aliasModalOverlay) {
-      aliasModalOverlay.style.display = 'none';
-    }
-    currentAliasTargetDomain = '';
-  }
-
-  btnCancelSiteAlias?.addEventListener('click', closeAliasModal);
-
-  btnSaveSiteAlias?.addEventListener('click', async () => {
-    if (!currentAliasTargetDomain) return;
-    const newAlias = inputSiteAlias?.value?.trim() || '';
-    await setDomainDisplayName(currentAliasTargetDomain, newAlias);
-    closeAliasModal();
-    showToast(newAlias ? `已保存别名 [${newAlias}]` : '已清除自定义别名');
-    await refreshCurrentDomainDisplay();
-    if (manifestModalOverlay && manifestModalOverlay.style.display !== 'none') {
-      await renderAllManifest(inputSearchManifest?.value || '');
-    }
+  // 17. 站点别名就地修改交互 (主面板)
+  currentDomainAlias?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    triggerMainDomainInlineEdit();
   });
-
-  aliasModalOverlay?.addEventListener('click', (e) => {
-    if (e.target === aliasModalOverlay) closeAliasModal();
-  });
-
-  btnEditCurrentAlias?.addEventListener('click', async () => {
-    const curName = await getDomainDisplayName(currentDomain);
-    openAliasModal(currentDomain, curName);
-  });
-
-  currentDomainText?.addEventListener('dblclick', async () => {
-    const curName = await getDomainDisplayName(currentDomain);
-    openAliasModal(currentDomain, curName);
-  });
-
-  currentDomainAlias?.addEventListener('dblclick', async () => {
-    const curName = await getDomainDisplayName(currentDomain);
-    openAliasModal(currentDomain, curName);
+  currentDomainAlias?.addEventListener('dblclick', (e) => {
+    e.stopPropagation();
+    triggerMainDomainInlineEdit();
   });
 
   // 18. 全部已存站点与账号清单全屏模态弹窗交互 (清单透明化)
@@ -1317,7 +1380,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const displayTitle = hasCustomName ? group.displayName : group.unicodeDomain;
       const subTitle = hasCustomName ? group.unicodeDomain : '';
 
-      const serviceTag = (group.serviceKey && group.serviceKey !== group.displayName)
+      const serviceTag = (group.serviceKey && group.serviceKey !== group.displayName && group.serviceKey !== group.domain && group.serviceKey !== group.unicodeDomain)
         ? `<span class="alias-tag-badge" style="margin-left: 4px;">🏷️ ${group.serviceKey}</span>`
         : '';
 
@@ -1336,8 +1399,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       card.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px dashed var(--color-border);">
-          <div style="display: flex; flex-direction: column; gap: 2px; overflow: hidden; min-width: 0;">
-            <div style="display: flex; align-items: center; gap: 4px; overflow: hidden;">
+          <div style="display: flex; flex-direction: column; gap: 2px; overflow: hidden; min-width: 0; flex: 1; margin-right: 6px;">
+            <div class="manifest-domain-title-area" style="display: flex; align-items: center; gap: 4px; overflow: hidden;">
               <span style="font-size: 14px; flex-shrink: 0;">${hasCustomName ? '🏷️' : '🌐'}</span>
               <span class="manifest-domain-title-text" style="font-weight: 700; font-size: 13px; color: var(--color-text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;" title="双击或点击 ✏️ 修改备注名称" data-domain="${group.domain}" data-alias="${group.displayName || ''}">
                 ${displayTitle}
@@ -1345,9 +1408,13 @@ document.addEventListener('DOMContentLoaded', async () => {
               <button type="button" class="btn-edit-alias-icon" data-domain="${group.domain}" data-alias="${group.displayName || ''}" title="点击修改备注名称">
                 ✏️
               </button>
-              ${serviceTag}
             </div>
-            ${subTitle ? `<div style="font-size: 10px; color: var(--color-text-dim); margin-left: 20px;">🌐 ${subTitle}</div>` : ''}
+            ${(subTitle || serviceTag) ? `
+              <div style="font-size: 10px; color: var(--color-text-dim); margin-left: 20px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                ${subTitle ? `<span>🌐 ${subTitle}</span>` : ''}
+                ${serviceTag}
+              </div>
+            ` : ''}
           </div>
           <div style="display: flex; gap: 6px; flex-shrink: 0; align-items: center;">
             ${!isCurrentSite ? `
@@ -1441,23 +1508,35 @@ document.addEventListener('DOMContentLoaded', async () => {
         accListContainer.appendChild(row);
       }
 
-      // 编辑此站点备注名称 (支持点击 ✏️ 图标或双击站点名称)
+      // 编辑此站点备注名称 (行内就地修改，点击 ✏️ 图标或双击站点名称)
+      const titleArea = card.querySelector('.manifest-domain-title-area') as HTMLElement | null;
+      const initialName = group.displayName || displayTitle;
+
+      const handleInlineEdit = (e: Event) => {
+        e.stopPropagation();
+        if (!titleArea) return;
+        startInlineAliasEdit(
+          titleArea,
+          group.domain,
+          initialName,
+          async () => {
+            if (group.domain === currentDomain) {
+              await refreshCurrentDomainDisplay();
+            }
+            await renderAllManifest(inputSearchManifest?.value || '');
+          },
+          () => {
+            renderAllManifest(inputSearchManifest?.value || '');
+          }
+        );
+      };
+
       card.querySelectorAll('.btn-edit-alias-icon').forEach((btn) => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const targetDomain = (btn as HTMLElement).dataset.domain || '';
-          const currentAlias = (btn as HTMLElement).dataset.alias || '';
-          openAliasModal(targetDomain, currentAlias);
-        });
+        btn.addEventListener('click', handleInlineEdit);
       });
 
       card.querySelectorAll('.manifest-domain-title-text').forEach((titleEl) => {
-        titleEl.addEventListener('dblclick', (e) => {
-          e.stopPropagation();
-          const targetDomain = (titleEl as HTMLElement).dataset.domain || '';
-          const currentAlias = (titleEl as HTMLElement).dataset.alias || '';
-          openAliasModal(targetDomain, currentAlias);
-        });
+        titleEl.addEventListener('dblclick', handleInlineEdit);
       });
 
       // 载入主面板
@@ -1499,10 +1578,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if (aliasModalOverlay && aliasModalOverlay.style.display !== 'none') {
-        closeAliasModal();
-        return;
-      }
       if (manifestModalOverlay && manifestModalOverlay.style.display !== 'none') {
         closeManifestModal();
       }
