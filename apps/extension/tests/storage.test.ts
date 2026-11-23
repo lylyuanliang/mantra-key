@@ -34,6 +34,8 @@ import {
   getAllAccountsManifest,
   linkDomainToExisting,
   matchDomainAlias,
+  setDomainDisplayName,
+  getDomainDisplayName,
 } from '../src/utils/storage.ts';
 
 test('matchDomainAlias 通配与跨域模式匹配', () => {
@@ -100,4 +102,21 @@ test('getAllAccountsManifest 与 linkDomainToExisting 关联测试', async () =>
   assert.strictEqual(resLinked[0].serviceKey, '三毛机场');
   assert.strictEqual(resLinked[0].version, 1);
   assert.strictEqual(resLinked[0].rulePreset, 'standard-16');
+});
+
+test('站点自定义别名 (DisplayName) 与多域名关联详情 (associatedDomains) 测试', async () => {
+  // 1. 设置自定义别名
+  await setDomainDisplayName('三毛机场.com', '三毛专线');
+  const alias = await getDomainDisplayName('三毛机场.com');
+  assert.strictEqual(alias, '三毛专线');
+
+  // 2. 检查全量清单：聚合了别名与多域名关联详情
+  const manifest = await getAllAccountsManifest();
+  const group = manifest.find((g) => g.unicodeDomain.includes('三毛机场'));
+  assert.ok(group);
+  assert.strictEqual(group.displayName, '三毛专线');
+
+  // 验证 associatedDomains 包含了前面 link 的 new-flight-gw.org 以及 aliases 中的 cleanip.io
+  assert.ok(group.associatedDomains.length >= 1);
+  assert.ok(group.associatedDomains.some((d) => d.includes('cleanip.io') || d.includes('new-flight-gw.org')));
 });

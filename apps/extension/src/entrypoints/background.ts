@@ -15,6 +15,7 @@ import {
   updateAccountVersion,
   getAllAccountsManifest,
   linkDomainToExisting,
+  setDomainDisplayName,
 } from '../utils/storage';
 import { deriveSitePassword, RulePreset } from '../utils/crypto';
 import { checkExtensionUpdate } from '../utils/update';
@@ -352,12 +353,51 @@ export default defineBackground(() => {
       return true;
     }
 
-    // 8.4 检查扩展最新版本与下载直链
+    // 8.4 修改站点别名/备注名称
+    if (action === 'SET_DOMAIN_DISPLAY_NAME') {
+      const domain = (payload?.domain as string) || '';
+      const displayName = (payload?.displayName as string) || '';
+      setDomainDisplayName(domain, displayName).then(() => {
+        sendResponse({ status: 'ok' });
+      }).catch((err) => {
+        sendResponse({ status: 'error', message: err?.message });
+      });
+      return true;
+    }
+
+    // 8.5 检查扩展最新版本与下载直链
     if (action === 'CHECK_EXTENSION_UPDATE') {
       checkExtensionUpdate().then((info) => {
         sendResponse({ status: 'ok', data: info });
       }).catch((err) => {
         sendResponse({ status: 'error', message: err?.message });
+      });
+      return true;
+    }
+
+    // 8.6 执行扩展一键自动更新 (优先尝试 Native Host 原生覆写与热重载)
+    if (action === 'EXECUTE_EXTENSION_AUTO_UPDATE') {
+      if (!nativePort) {
+        connectToNativeDaemon();
+      }
+
+      sendNativeRequest('AUTO_UPDATE_EXTENSION', payload).then((nativeRes) => {
+        if (nativeRes && nativeRes.status === 'ok') {
+          sendResponse({
+            status: 'ok',
+            isNative: true,
+            message: nativeRes.message || '原生静默更新完成',
+            data: nativeRes.data
+          });
+        } else {
+          sendResponse({
+            status: 'error',
+            isNative: false,
+            message: nativeRes?.message || 'Native Host 不可用或返回失败'
+          });
+        }
+      }).catch((err) => {
+        sendResponse({ status: 'error', isNative: false, message: err?.message });
       });
       return true;
     }

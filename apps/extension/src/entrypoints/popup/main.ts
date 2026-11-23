@@ -18,6 +18,8 @@ import {
   updateAccountVersion,
   getAllAccountsManifest,
   linkDomainToExisting,
+  getDomainDisplayName,
+  setDomainDisplayName,
   type AccountRecord,
 } from '../../utils/storage';
 import {
@@ -31,7 +33,7 @@ import {
   normalizeWebDAVUrl,
   type WebDAVConfig,
 } from '../../utils/webdav';
-import { checkExtensionUpdate } from '../../utils/update';
+import { checkExtensionUpdate, performExtensionAutoUpdate } from '../../utils/update';
 
 document.addEventListener('DOMContentLoaded', async () => {
   // DOM 元素引用
@@ -59,6 +61,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 解锁视图元素
   const currentDomainText = document.getElementById('current-domain-text') as HTMLElement;
+  const currentDomainAlias = document.getElementById('current-domain-alias') as HTMLElement | null;
+  const btnEditCurrentAlias = document.getElementById('btn-edit-current-alias') as HTMLButtonElement | null;
   const btnEditDomain = document.getElementById('btn-edit-domain') as HTMLButtonElement;
   const domainEditBox = document.getElementById('domain-edit-box') as HTMLElement;
   const inputCustomDomain = document.getElementById('input-custom-domain') as HTMLInputElement;
@@ -575,6 +579,24 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ================= 初始加载与事件监听 =================
 
+  async function refreshCurrentDomainDisplay() {
+    const unicode = toUnicodeDomain(currentDomain);
+    currentDomainText.textContent = unicode;
+    currentDomainText.title = currentDomain;
+
+    const displayName = await getDomainDisplayName(currentDomain);
+    if (displayName && displayName !== unicode && displayName !== currentDomain) {
+      if (currentDomainAlias) {
+        currentDomainAlias.textContent = `🏷️ ${displayName}`;
+        currentDomainAlias.style.display = 'inline-block';
+      }
+    } else {
+      if (currentDomainAlias) {
+        currentDomainAlias.style.display = 'none';
+      }
+    }
+  }
+
   // 1. 获取当前活动标签页真实域名并转换为友好 Unicode
   try {
     const domainRes = await new Promise<{ domain?: string; title?: string }>((resolve) => {
@@ -589,8 +611,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   } catch (e) {
     console.warn('[Popup] 获取活动域名失败:', e);
   }
-  currentDomainText.textContent = toUnicodeDomain(currentDomain);
-  currentDomainText.title = currentDomain;
+  await refreshCurrentDomainDisplay();
 
   // 2. 检查会话状态并渲染视图
   const session = await getSessionState();
@@ -630,14 +651,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnToggleMantraEye.title = isMantraPeek ? '点击隐藏口令' : '点击显示明文';
   });
 
-  // 5. 检查插件在线版本更新
+  // 5. 检查插件在线版本更新与一键静默升级
   checkExtensionUpdate().then((info) => {
     if (info?.hasUpdate && updateBanner && updateBannerText && btnDownloadUpdate) {
       updateBanner.style.display = 'flex';
       updateBannerText.textContent = `🚀 密诀新版本 v${info.latestVersion} 可用！`;
-      btnDownloadUpdate.onclick = () => {
-        chrome.tabs.create({ url: info.acceleratedDownloadUrl });
-        showToast('🎉 开始下载更新包！解压覆盖插件目录并在扩展管理页刷新即可');
+      btnDownloadUpdate.onclick = async () => {
+        btnDownloadUpdate.disabled = true;
+        btnDownloadUpdate.textContent = '⏳ 更新中...';
+        showToast('正在执行在线自动更新...');
+
+        const updateResult = await performExtensionAutoUpdate(info, (statusText) => {
+          showToast(statusText);
+        });
+
+        if (updateResult.success) {
+          showToast(updateResult.message);
+        } else {
+          showToast(updateResult.message, 5000);
+          btnDownloadUpdate.disabled = false;
+          btnDownloadUpdate.textContent = '⚡ 一键更新';
+        }
       };
     }
   }).catch(() => {});
@@ -664,12 +698,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     inputCustomDomain.focus();
   });
 
-  btnConfirmDomain.addEventListener('click', () => {
+  btnConfirmDomain.addEventListener('click', async () => {
     const custom = inputCustomDomain.value.trim().toLowerCase();
     if (custom) {
       currentDomain = custom;
-      currentDomainText.textContent = toUnicodeDomain(currentDomain);
-      currentDomainText.title = currentDomain;
+      await refreshCurrentDomainDisplay();
       domainEditBox.style.display = 'none';
       loadDomainAccounts();
       updateNewPwdPreview();
@@ -1139,7 +1172,69 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // 17. 全部已存站点与账号清单全屏模态弹窗交互 (清单透明化)
+  // 17. 站点自定义别名修改模态弹窗交互
+  const aliasModalOverlay = document.getElementById('alias-modal-overlay');
+  const aliasModalDomainDesc = document.getElementById('alias-modal-domain-desc');
+  const inputSiteAlias = document.getElementById('input-site-alias') as HTMLInputElement | null;
+  const btnSaveSiteAlias = document.getElementById('btn-save-site-alias');
+  const btnCancelSiteAlias = document.getElementById('btn-cancel-site-alias');
+  let currentAliasTargetDomain = '';
+
+  function openAliasModal(domain: string, initialAlias: string = '') {
+    currentAliasTargetDomain = domain;
+    if (aliasModalDomainDesc) {
+      aliasModalDomainDesc.textContent = `为站点 [${toUnicodeDomain(domain)}] 设置自定义别名（便于随时识别）：`;
+    }
+    if (inputSiteAlias) {
+      inputSiteAlias.value = initialAlias || '';
+    }
+    if (aliasModalOverlay) {
+      aliasModalOverlay.style.display = 'flex';
+      setTimeout(() => inputSiteAlias?.focus(), 50);
+    }
+  }
+
+  function closeAliasModal() {
+    if (aliasModalOverlay) {
+      aliasModalOverlay.style.display = 'none';
+    }
+    currentAliasTargetDomain = '';
+  }
+
+  btnCancelSiteAlias?.addEventListener('click', closeAliasModal);
+
+  btnSaveSiteAlias?.addEventListener('click', async () => {
+    if (!currentAliasTargetDomain) return;
+    const newAlias = inputSiteAlias?.value?.trim() || '';
+    await setDomainDisplayName(currentAliasTargetDomain, newAlias);
+    closeAliasModal();
+    showToast(newAlias ? `已保存别名 [${newAlias}]` : '已清除自定义别名');
+    await refreshCurrentDomainDisplay();
+    if (manifestModalOverlay && manifestModalOverlay.style.display !== 'none') {
+      await renderAllManifest(inputSearchManifest?.value || '');
+    }
+  });
+
+  aliasModalOverlay?.addEventListener('click', (e) => {
+    if (e.target === aliasModalOverlay) closeAliasModal();
+  });
+
+  btnEditCurrentAlias?.addEventListener('click', async () => {
+    const curName = await getDomainDisplayName(currentDomain);
+    openAliasModal(currentDomain, curName);
+  });
+
+  currentDomainText?.addEventListener('dblclick', async () => {
+    const curName = await getDomainDisplayName(currentDomain);
+    openAliasModal(currentDomain, curName);
+  });
+
+  currentDomainAlias?.addEventListener('dblclick', async () => {
+    const curName = await getDomainDisplayName(currentDomain);
+    openAliasModal(currentDomain, curName);
+  });
+
+  // 18. 全部已存站点与账号清单全屏模态弹窗交互 (清单透明化)
   const btnOpenAllManifest = document.getElementById('btn-open-all-manifest');
   const manifestModalOverlay = document.getElementById('manifest-modal-overlay');
   const btnCloseManifestModal = document.getElementById('btn-close-manifest-modal');
@@ -1180,11 +1275,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const filtered = manifest.filter((group) => {
       if (!query) return true;
+      if (group.displayName && group.displayName.toLowerCase().includes(query)) return true;
       if (group.domain.toLowerCase().includes(query)) return true;
       if (group.unicodeDomain.toLowerCase().includes(query)) return true;
       if (group.serviceKey && group.serviceKey.toLowerCase().includes(query)) return true;
+      if (group.associatedDomains.some((d) => d.toLowerCase().includes(query))) return true;
       return group.accounts.some((acc) =>
         acc.username.toLowerCase().includes(query) ||
+        (acc.displayName && acc.displayName.toLowerCase().includes(query)) ||
         (acc.serviceKey && acc.serviceKey.toLowerCase().includes(query))
       );
     });
@@ -1215,30 +1313,59 @@ document.addEventListener('DOMContentLoaded', async () => {
       const isCurrentSite = group.domain.toLowerCase() === currentDomain.toLowerCase() ||
                             group.unicodeDomain.toLowerCase() === currentDomain.toLowerCase();
 
-      const serviceTag = group.serviceKey ? `<span class="alias-tag-badge" style="margin-left: 6px;">🏷️ ${group.serviceKey}</span>` : '';
+      const hasCustomName = Boolean(group.displayName && group.displayName !== group.unicodeDomain && group.displayName !== group.domain);
+      const displayTitle = hasCustomName ? group.displayName : group.unicodeDomain;
+      const subTitle = hasCustomName ? group.unicodeDomain : '';
+
+      const serviceTag = (group.serviceKey && group.serviceKey !== group.displayName)
+        ? `<span class="alias-tag-badge" style="margin-left: 4px;">🏷️ ${group.serviceKey}</span>`
+        : '';
+
+      const assocDrawerHtml = (group.associatedDomains && group.associatedDomains.length > 0)
+        ? `
+          <div class="assoc-domains-drawer">
+            <div class="assoc-domains-header">
+              <span class="assoc-title">🔗 已关联镜像域名 (${group.associatedDomains.length})</span>
+            </div>
+            <div class="assoc-domains-list">
+              ${group.associatedDomains.map((d) => `<span class="assoc-domain-pill" title="${d}">${d}</span>`).join('')}
+            </div>
+          </div>
+        `
+        : '';
 
       card.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px dashed var(--color-border);">
-          <div style="display: flex; align-items: center; gap: 6px; overflow: hidden;">
-            <span style="font-size: 14px;">🌐</span>
-            <span style="font-weight: 700; font-size: 13px; color: var(--color-text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${group.domain}">
-              ${group.unicodeDomain}
-            </span>
-            ${serviceTag}
-            ${isCurrentSite ? '<span style="font-size: 9.5px; background: rgba(13, 148, 136, 0.15); color: var(--color-primary); padding: 1px 5px; border-radius: 4px; font-weight: 600;">当前站点</span>' : ''}
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px dashed var(--color-border);">
+          <div style="display: flex; flex-direction: column; gap: 2px; overflow: hidden; min-width: 0;">
+            <div style="display: flex; align-items: center; gap: 4px; overflow: hidden;">
+              <span style="font-size: 14px; flex-shrink: 0;">${hasCustomName ? '🏷️' : '🌐'}</span>
+              <span class="manifest-domain-title-text" style="font-weight: 700; font-size: 13px; color: var(--color-text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;" title="双击或点击 ✏️ 修改备注名称" data-domain="${group.domain}" data-alias="${group.displayName || ''}">
+                ${displayTitle}
+              </span>
+              <button type="button" class="btn-edit-alias-icon" data-domain="${group.domain}" data-alias="${group.displayName || ''}" title="点击修改备注名称">
+                ✏️
+              </button>
+              ${serviceTag}
+            </div>
+            ${subTitle ? `<div style="font-size: 10px; color: var(--color-text-dim); margin-left: 20px;">🌐 ${subTitle}</div>` : ''}
           </div>
-          <div style="display: flex; gap: 6px; flex-shrink: 0;">
+          <div style="display: flex; gap: 6px; flex-shrink: 0; align-items: center;">
             ${!isCurrentSite ? `
               <button type="button" class="btn-link-here btn-xs-primary" style="padding: 3px 8px; font-size: 10.5px; cursor: pointer;" title="将当前打开的网页关联为该站点的镜像别名">
                 🔗 关联当前网页
               </button>
             ` : ''}
-            <button type="button" class="btn-switch-domain btn-xs-muted" style="padding: 3px 8px; font-size: 10.5px; cursor: pointer;" title="在面板中设为当前站点并管理账号">
-              🎯 设为当前站点
-            </button>
+            ${isCurrentSite ? `
+              <span class="manifest-current-badge" title="当前主面板正在查看此站点">✓ 当前正在查看</span>
+            ` : `
+              <button type="button" class="btn-switch-domain btn-load-panel" title="将此站点的账号与规则载入主界面进行派生与管理">
+                🖥️ 载入主面板
+              </button>
+            `}
           </div>
         </div>
-        <div class="manifest-acc-list" style="display: flex; flex-direction: column; gap: 6px;"></div>
+        ${assocDrawerHtml}
+        <div class="manifest-acc-list" style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;"></div>
       `;
 
       const accListContainer = card.querySelector('.manifest-acc-list') as HTMLElement;
@@ -1278,8 +1405,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           e.stopPropagation();
           if (!activeMantra) {
             currentDomain = group.domain;
-            currentDomainText.textContent = toUnicodeDomain(currentDomain);
-            currentDomainText.title = currentDomain;
+            await refreshCurrentDomainDisplay();
             await loadDomainAccounts();
             applySelectedAccount(acc);
             closeManifestModal();
@@ -1315,15 +1441,33 @@ document.addEventListener('DOMContentLoaded', async () => {
         accListContainer.appendChild(row);
       }
 
-      // 切换管理此站点
-      card.querySelector('.btn-switch-domain')?.addEventListener('click', () => {
+      // 编辑此站点备注名称 (支持点击 ✏️ 图标或双击站点名称)
+      card.querySelectorAll('.btn-edit-alias-icon').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const targetDomain = (btn as HTMLElement).dataset.domain || '';
+          const currentAlias = (btn as HTMLElement).dataset.alias || '';
+          openAliasModal(targetDomain, currentAlias);
+        });
+      });
+
+      card.querySelectorAll('.manifest-domain-title-text').forEach((titleEl) => {
+        titleEl.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          const targetDomain = (titleEl as HTMLElement).dataset.domain || '';
+          const currentAlias = (titleEl as HTMLElement).dataset.alias || '';
+          openAliasModal(targetDomain, currentAlias);
+        });
+      });
+
+      // 载入主面板
+      card.querySelector('.btn-switch-domain')?.addEventListener('click', async () => {
         currentDomain = group.domain;
-        currentDomainText.textContent = toUnicodeDomain(currentDomain);
-        currentDomainText.title = currentDomain;
+        await refreshCurrentDomainDisplay();
         loadDomainAccounts();
         updateNewPwdPreview();
         closeManifestModal();
-        showToast(`已切换至站点: ${group.unicodeDomain}`);
+        showToast(`已将 [${displayTitle}] 载入主面板`);
       });
 
       // 关联当前网页
@@ -1332,7 +1476,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (ok) {
           await loadDomainAccounts();
           closeManifestModal();
-          showToast(`已成功将当前站点 [${toUnicodeDomain(currentDomain)}] 关联至 [${group.unicodeDomain}]！`);
+          showToast(`已成功将当前站点 [${toUnicodeDomain(currentDomain)}] 关联至 [${displayTitle}]！`);
         } else {
           showToast('关联失败');
         }
@@ -1354,8 +1498,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && manifestModalOverlay && manifestModalOverlay.style.display !== 'none') {
-      closeManifestModal();
+    if (e.key === 'Escape') {
+      if (aliasModalOverlay && aliasModalOverlay.style.display !== 'none') {
+        closeAliasModal();
+        return;
+      }
+      if (manifestModalOverlay && manifestModalOverlay.style.display !== 'none') {
+        closeManifestModal();
+      }
     }
   });
 

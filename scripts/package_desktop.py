@@ -19,6 +19,11 @@ if hasattr(sys.stdout, 'reconfigure'):
     except Exception:
         pass
 
+def make_crlf_gbk_bytes(text: str) -> bytes:
+    """强制使用 Windows CRLF 换行符与 GBK 编码，确保 Windows cmd.exe 打开百分之百不乱码、不截断指令"""
+    crlf_text = text.replace("\r\n", "\n").replace("\n", "\r\n")
+    return crlf_text.encode("gbk", errors="replace")
+
 def package_desktop(desktop_exe, proxy_exe, output_zip, version="0.1.0"):
     desktop_exe = os.path.normpath(desktop_exe)
     proxy_exe = os.path.normpath(proxy_exe)
@@ -32,38 +37,39 @@ def package_desktop(desktop_exe, proxy_exe, output_zip, version="0.1.0"):
     os.makedirs(os.path.dirname(os.path.abspath(output_zip)), exist_ok=True)
 
     host_manifest = {
-        "name": "com.mantrakey.proxy",
+        "name": "org.mantrakey.native_proxy",
         "description": "MantraKey Native Messaging Host for Chrome & Edge",
         "path": "mantra-native-proxy.exe",
         "type": "stdio",
         "allowed_origins": [
+            "chrome-extension://bggcaoiaeleahlgnglcglifibgolhief/",
             "chrome-extension://*/"
         ]
     }
 
     install_bat = """@echo off
-chcp 65001 >nul
-echo [MantraKey] 正在注册 Native Messaging Host 到当前用户注册表...
-set HOST_PATH=%~dp0com.mantrakey.proxy.json
-echo 配置清单路径: %HOST_PATH%
-
-REG ADD "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.mantrakey.proxy" /ve /t REG_SZ /d "%HOST_PATH%" /f >nul
-REG ADD "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com.mantrakey.proxy" /ve /t REG_SZ /d "%HOST_PATH%" /f >nul
-
-if %ERRORLEVEL% EQU 0 (
-    echo [成功] MantraKey 本地原生代理桩已成功注册到 Chrome 与 Edge！
-) else (
-    echo [失败] 注册表写入失败，请检查权限。
-)
+title 密诀 MantraKey - 注册原生代理通道
+echo ========================================================
+echo   密诀 MantraKey - 桌面中枢与浏览器原生代理一键配置
+echo ========================================================
+echo.
+echo 正在检测扩展并注册原生代理服务...
+"%~dp0mantra-native-proxy.exe" --register
+echo.
 pause
 """
 
     uninstall_bat = """@echo off
-chcp 65001 >nul
-echo [MantraKey] 正在卸载 Native Messaging Host 注册表配置...
-REG DELETE "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.mantrakey.proxy" /f >nul 2>&1
-REG DELETE "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com.mantrakey.proxy" /f >nul 2>&1
-echo [完成] 原生代理桩注册表项已移除。
+title 密诀 MantraKey - 卸载原生服务
+echo ========================================================
+echo   密诀 MantraKey - 原生代理服务卸载
+echo ========================================================
+echo.
+echo 正在移除 Chrome 与 Edge 的原生代理注册表项...
+REG DELETE "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\org.mantrakey.native_proxy" /f >nul 2>&1
+REG DELETE "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\org.mantrakey.native_proxy" /f >nul 2>&1
+echo [完成] 原生代理服务注册表已安全移除。
+echo.
 pause
 """
 
@@ -85,10 +91,10 @@ pause
     with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(desktop_exe, "mantra-desktop.exe")
         z.write(proxy_exe, "mantra-native-proxy.exe")
-        z.writestr("com.mantrakey.proxy.json", json.dumps(host_manifest, indent=2, ensure_ascii=False))
-        z.writestr("install_host.bat", install_bat)
-        z.writestr("uninstall_host.bat", uninstall_bat)
-        z.writestr("README.txt", readme_txt)
+        z.writestr("org.mantrakey.native_proxy.json", json.dumps(host_manifest, indent=2, ensure_ascii=False))
+        z.writestr("install_host.bat", make_crlf_gbk_bytes(install_bat))
+        z.writestr("uninstall_host.bat", make_crlf_gbk_bytes(uninstall_bat))
+        z.writestr("README.txt", make_crlf_gbk_bytes(readme_txt))
 
     print(f"[PackageDesktop] 成功打包桌面分发包: {output_zip} ({os.path.getsize(output_zip)} 字节)")
 

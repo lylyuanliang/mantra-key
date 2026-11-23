@@ -9,6 +9,7 @@ export interface AccountRecord {
   username: string;
   version: number;
   rulePreset: RulePreset;
+  displayName?: string; // 站点自定义别名/备注名称 (如 "三毛机场", "坚果云")
   serviceKey?: string; // 通用服务归属标识 (如 "三毛机场")，用于跨域名派生对齐
   aliases?: string[];  // 别名域名列表或通配模式 (如 ["cleanip.io", "gw-*.三毛机场.com"])
   tag?: string;
@@ -23,8 +24,69 @@ export interface SessionState {
   ttlRemaining: number; // 剩余秒数
 }
 
+export interface DomainMeta {
+  displayName?: string;
+  updatedAt?: number;
+}
+
 const SESSION_STORAGE_KEY = 'mantra_active_session';
 const ACCOUNTS_PREFIX = 'mantra_accs_';
+const DOMAIN_META_PREFIX = 'mantra_meta_';
+
+/**
+ * 获取指定域名的自定义别名
+ */
+export async function getDomainDisplayName(domain: string): Promise<string> {
+  if (!domain) return '';
+  const dKey = domain.trim().toLowerCase();
+  try {
+    const metaKey = `${DOMAIN_META_PREFIX}${dKey}`;
+    const res = await chrome.storage.local.get([metaKey]);
+    if (res[metaKey]?.displayName) {
+      return res[metaKey].displayName;
+    }
+    const accKey = `${ACCOUNTS_PREFIX}${dKey}`;
+    const accRes = await chrome.storage.local.get([accKey]);
+    const accList = (accRes[accKey] as AccountRecord[]) || [];
+    const withName = accList.find((a) => a.displayName || a.serviceKey);
+    return withName?.displayName || withName?.serviceKey || '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 设置/修改指定域名的别名
+ */
+export async function setDomainDisplayName(domain: string, displayName: string): Promise<void> {
+  if (!domain) return;
+  const dKey = domain.trim().toLowerCase();
+  const trimmedName = displayName.trim();
+  const metaKey = `${DOMAIN_META_PREFIX}${dKey}`;
+  const now = Date.now();
+
+  // 1. 保存到 meta
+  await chrome.storage.local.set({
+    [metaKey]: {
+      displayName: trimmedName,
+      updatedAt: now
+    }
+  });
+
+  // 2. 同步更新该域名下所有账号记录
+  const accKey = `${ACCOUNTS_PREFIX}${dKey}`;
+  const allStorage = await chrome.storage.local.get([accKey]);
+  const accs = (allStorage[accKey] as AccountRecord[]) || [];
+  if (Array.isArray(accs) && accs.length > 0) {
+    const updated = accs.map((a) => ({
+      ...a,
+      displayName: trimmedName || undefined,
+      serviceKey: a.serviceKey || trimmedName || undefined,
+      updatedAt: now
+    }));
+    await chrome.storage.local.set({ [accKey]: updated });
+  }
+}
 
 /**
  * 判断目标域名是否匹配别名模式 (支持精确匹配、Unicode/Punycode 归一化与 *.xxx.com 通配符)
@@ -135,31 +197,105 @@ export async function getAccountsForDomain(domain: string, pageTitle = ''): Prom
 export interface DomainAccountsGroup {
   domain: string;
   unicodeDomain: string;
+  displayName?: string;
   serviceKey?: string;
+  associatedDomains: string[]; // 关联的全部域名清单 (包括 aliases 与通过 serviceKey/tag 关联的镜像域名)
   accounts: AccountRecord[];
 }
 
 /**
- * 获取全量已保存站点与账号清单（支持用户纵览所有记录）
+ * 获取全量已保存站点与账号清单（支持用户纵览所有记录、别名与关联详情）
  */
 export async function getAllAccountsManifest(): Promise<DomainAccountsGroup[]> {
   try {
     const allStorage = await chrome.storage.local.get(null);
     const groups: DomainAccountsGroup[] = [];
 
+    // 1. 扫描建立多端关联别名与通用服务索引
+    const domainAliasMap = new Map<string, Set<string>>();
+    const serviceKeyDomainMap = new Map<string, Set<string>>();
+
+    for (const [key, val] of Object.entries(allStorage)) {
+      if (key.startsWith(ACCOUNTS_PREFIX) && Array.isArray(val) && val.length > 0) {
+        const domain = key.substring(ACCOUNTS_PREFIX.length).toLowerCase();
+        const accounts = val as AccountRecord[];
+
+        if (!domainAliasMap.has(domain)) {
+          domainAliasMap.set(domain, new Set());
+        }
+
+        for (const acc of accounts) {
+          if (Array.isArray(acc.aliases)) {
+            for (const alias of acc.aliases) {
+              const cleanAlias = toUnicodeDomain(alias.trim().toLowerCase());
+              if (cleanAlias && cleanAlias !== domain && cleanAlias !== toUnicodeDomain(domain)) {
+                domainAliasMap.get(domain)!.add(cleanAlias);
+              }
+            }
+          }
+          if (acc.serviceKey) {
+            const sk = acc.serviceKey.trim().toLowerCase();
+            if (!serviceKeyDomainMap.has(sk)) {
+              serviceKeyDomainMap.set(sk, new Set());
+            }
+            serviceKeyDomainMap.get(sk)!.add(toUnicodeDomain(domain));
+          }
+        }
+      }
+    }
+
+    // 2. 组装 groups 并填充自定义别名与多域名关联详情
     for (const [key, val] of Object.entries(allStorage)) {
       if (key.startsWith(ACCOUNTS_PREFIX) && Array.isArray(val) && val.length > 0) {
         const domain = key.substring(ACCOUNTS_PREFIX.length);
         const accounts = val as AccountRecord[];
+        const metaKey = `${DOMAIN_META_PREFIX}${domain.toLowerCase()}`;
+        const meta = allStorage[metaKey] as DomainMeta | undefined;
+
+        const displayName = meta?.displayName ||
+          accounts.find((a) => a.displayName)?.displayName ||
+          accounts.find((a) => a.serviceKey)?.serviceKey ||
+          '';
+
         const serviceKey = accounts.find((a) => a.serviceKey)?.serviceKey;
+
+        // 收集该域名的全部关联域名
+        const assocSet = new Set<string>(domainAliasMap.get(domain.toLowerCase()) || []);
+
+        // 若有 serviceKey，将共享相同 serviceKey 的其他域名也加入关联详情
+        if (serviceKey) {
+          const skKey = serviceKey.trim().toLowerCase();
+          const sharedDomains = serviceKeyDomainMap.get(skKey);
+          if (sharedDomains) {
+            for (const sd of sharedDomains) {
+              if (sd !== domain && sd !== toUnicodeDomain(domain)) {
+                assocSet.add(sd);
+              }
+            }
+          }
+        }
+
+        // 检查 accounts 的 tag 中包含的 "已关联: xxx"
+        for (const a of accounts) {
+          if (a.tag && a.tag.startsWith('已关联:')) {
+            const linked = a.tag.replace(/^已关联:\s*/, '').trim();
+            if (linked && linked !== domain && linked !== toUnicodeDomain(domain)) {
+              assocSet.add(toUnicodeDomain(linked));
+            }
+          }
+        }
+
         groups.push({
           domain,
           unicodeDomain: toUnicodeDomain(domain),
+          displayName: displayName || undefined,
           serviceKey,
+          associatedDomains: Array.from(assocSet),
           accounts,
         });
       }
     }
+
     return groups;
   } catch {
     return [];

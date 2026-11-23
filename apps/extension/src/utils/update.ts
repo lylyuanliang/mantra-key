@@ -13,6 +13,63 @@ export interface ExtensionUpdateInfo {
   changelog: string;
   downloadUrl: string;
   acceleratedDownloadUrl: string;
+  sha256?: string;
+}
+
+export interface AutoUpdateResult {
+  success: boolean;
+  isNative: boolean;
+  message: string;
+}
+
+/**
+ * 触发全自动静默升级流程
+ * 优先调用 Native Messaging 驱动本地 Native Host 自动下载覆写；
+ * 若未安装 Native Host 或连接断开，自动平滑降级为提示并下载 ZIP 包。
+ */
+export async function performExtensionAutoUpdate(
+  info: ExtensionUpdateInfo,
+  onProgress?: (statusText: string) => void
+): Promise<AutoUpdateResult> {
+  onProgress?.('正在连接本地原生更新代理...');
+
+  // 1. 发送消息给 background 执行 Native 请求
+  const res = await new Promise<any>((resolve) => {
+    chrome.runtime.sendMessage({
+      action: 'EXECUTE_EXTENSION_AUTO_UPDATE',
+      payload: {
+        downloadUrl: info.acceleratedDownloadUrl,
+        directDownloadUrl: info.downloadUrl,
+        latestVersion: info.latestVersion,
+        sha256: info.sha256,
+        extensionId: chrome.runtime?.id
+      }
+    }, (response) => {
+      resolve(response);
+    });
+  });
+
+  if (res && res.status === 'ok') {
+    onProgress?.('🎉 本地文件覆写完成，正在热重载扩展...');
+    // 延迟 800ms 触发 reload 确保状态渲染与动画完成
+    setTimeout(() => {
+      chrome.runtime.reload();
+    }, 800);
+    return {
+      success: true,
+      isNative: true,
+      message: res.message || '更新成功，正在重新加载扩展'
+    };
+  }
+
+  // 2. 原生代理不可用时平滑降级为浏览器下载
+  onProgress?.('未检测到本地原生服务，正在为您下载离线更新包...');
+  chrome.tabs.create({ url: info.acceleratedDownloadUrl });
+  return {
+    success: false,
+    isNative: false,
+    message: '本地未运行 Native 代理，已通过浏览器下载更新包，解压覆盖后刷新即可'
+  };
 }
 
 export const GITHUB_REPO = 'lylyuanliang/mantra-key';

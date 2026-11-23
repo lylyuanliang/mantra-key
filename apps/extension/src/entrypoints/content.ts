@@ -487,7 +487,7 @@ export default defineContentScript({
           renderBubbleContent();
         });
 
-        const manifestRes = await safeSendMessage<{ groups?: Array<{ domain: string; unicodeDomain: string; serviceKey?: string; accounts: any[] }> }>({
+        const manifestRes = await safeSendMessage<{ groups?: Array<{ domain: string; unicodeDomain: string; displayName?: string; serviceKey?: string; associatedDomains?: string[]; accounts: any[] }> }>({
           action: 'GET_ALL_MANIFEST'
         }, 800);
 
@@ -501,10 +501,12 @@ export default defineContentScript({
           const filtered = groups.filter((g) => {
             if (!query) return true;
             return (
+              (g.displayName && g.displayName.toLowerCase().includes(query)) ||
               g.domain.toLowerCase().includes(query) ||
               g.unicodeDomain.toLowerCase().includes(query) ||
               (g.serviceKey && g.serviceKey.toLowerCase().includes(query)) ||
-              g.accounts.some((a) => a.username.toLowerCase().includes(query))
+              (g.associatedDomains && g.associatedDomains.some((d) => d.toLowerCase().includes(query))) ||
+              g.accounts.some((a) => a.username.toLowerCase().includes(query) || (a.displayName && a.displayName.toLowerCase().includes(query)))
             );
           });
 
@@ -519,25 +521,43 @@ export default defineContentScript({
 
           itemsContainer.innerHTML = filtered.map((g) => {
             const isCurrent = g.domain.toLowerCase() === currentDomain.toLowerCase();
+            const hasCustom = Boolean(g.displayName && g.displayName !== g.unicodeDomain && g.displayName !== g.domain);
+            const title = hasCustom ? g.displayName : g.unicodeDomain;
+            const subtitle = hasCustom ? g.unicodeDomain : '';
+
+            const assocHtml = (g.associatedDomains && g.associatedDomains.length > 0)
+              ? `
+                <div style="font-size: 9.5px; color: #64748b; margin-top: 3px; display: flex; flex-wrap: wrap; gap: 3px; align-items: center;">
+                  <span style="font-weight: 600;">🔗 关联(${g.associatedDomains.length}):</span>
+                  ${g.associatedDomains.map((d) => `<span style="background: rgba(13, 148, 136, 0.12); color: #0d9488; padding: 0 4px; border-radius: 2px;">${d}</span>`).join('')}
+                </div>
+              `
+              : '';
+
             return `
               <div class="bubble-manifest-group-card">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                  <div style="display: flex; align-items: center; gap: 5px; overflow: hidden;">
-                    <span style="font-size: 13px;">🌐</span>
-                    <span style="font-weight: 700; font-size: 11.5px; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${g.domain}">
-                      ${g.unicodeDomain}
-                    </span>
-                    ${g.serviceKey ? `<span style="font-size: 9px; background: rgba(13, 148, 136, 0.15); color: #0d9488; padding: 1px 4px; border-radius: 3px;">🏷️ ${g.serviceKey}</span>` : ''}
+                  <div style="display: flex; flex-direction: column; gap: 1px; overflow: hidden; min-width: 0;">
+                    <div style="display: flex; align-items: center; gap: 4px; overflow: hidden;">
+                      <span style="font-size: 13px; flex-shrink: 0;">${hasCustom ? '🏷️' : '🌐'}</span>
+                      <span class="bubble-domain-title-text" style="font-weight: 700; font-size: 11.5px; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;" title="双击或点击 ✏️ 修改备注名称" data-domain="${g.domain}" data-name="${g.displayName || ''}">
+                        ${title}
+                      </span>
+                      <button type="button" class="btn-edit-alias-inline" data-domain="${g.domain}" data-name="${g.displayName || ''}" title="点击修改备注名称" style="border: none; background: transparent; cursor: pointer; font-size: 11px; opacity: 0.6; padding: 0 3px;">✏️</button>
+                      ${g.serviceKey && g.serviceKey !== g.displayName ? `<span style="font-size: 9px; background: rgba(13, 148, 136, 0.15); color: #0d9488; padding: 1px 4px; border-radius: 3px;">🏷️ ${g.serviceKey}</span>` : ''}
+                    </div>
+                    ${subtitle ? `<span style="font-size: 9.5px; color: #64748b; margin-left: 17px;">🌐 ${subtitle}</span>` : ''}
                   </div>
                   <div style="display: flex; gap: 4px; flex-shrink: 0;">
                     ${!isCurrent ? `
-                      <button type="button" class="mantra-bubble-header-btn btn-link-this-group" data-domain="${g.domain}" data-name="${g.unicodeDomain}" style="padding: 2px 6px; color: #0d9488; border-color: #0d9488;" title="将当前网页关联为此站点的镜像">
+                      <button type="button" class="mantra-bubble-header-btn btn-link-this-group" data-domain="${g.domain}" data-name="${title}" style="padding: 2px 6px; color: #0d9488; border-color: #0d9488;" title="将当前网页关联为此站点的镜像">
                         🔗 关联当前页
                       </button>
-                    ` : '<span style="font-size: 9px; color: #0d9488; font-weight: 600;">当前站点</span>'}
+                    ` : '<span style="font-size: 9px; color: #0d9488; font-weight: 600;">✓ 当前站点</span>'}
                   </div>
                 </div>
-                <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                ${assocHtml}
+                <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;">
                   ${g.accounts.map((a) => `
                     <span style="font-size: 10px; background: #e2e8f0; color: #334155; padding: 1px 5px; border-radius: 3px;">
                       ${a.username} (v${a.version})
@@ -547,6 +567,43 @@ export default defineContentScript({
               </div>
             `;
           }).join('');
+
+          // 绑定修改别名 (点击 ✏️ 图标或双击名称)
+          async function triggerEditAlias(targetDomain: string, currentName: string) {
+            const newAlias = window.prompt(`为站点 [${targetDomain}] 设置备注名称:`, currentName);
+            if (newAlias !== null) {
+              const trimmed = newAlias.trim();
+              await safeSendMessage({
+                action: 'SET_DOMAIN_DISPLAY_NAME',
+                payload: { domain: targetDomain, displayName: trimmed }
+              }, 800);
+              showInPageToast(trimmed ? `已设置备注 [${trimmed}]` : '已清除备注名称');
+              const refreshedManifest = await safeSendMessage<{ groups?: any[] }>({ action: 'GET_ALL_MANIFEST' }, 800);
+              if (refreshedManifest?.groups) {
+                groups.splice(0, groups.length, ...refreshedManifest.groups);
+                const searchInput = bubble.querySelector<HTMLInputElement>('#bubble-manifest-search');
+                renderGroupCards(searchInput?.value || '');
+              }
+            }
+          }
+
+          itemsContainer.querySelectorAll('.btn-edit-alias-inline').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              const targetDomain = (btn as HTMLElement).dataset.domain || '';
+              const currentName = (btn as HTMLElement).dataset.name || '';
+              triggerEditAlias(targetDomain, currentName);
+            });
+          });
+
+          itemsContainer.querySelectorAll('.bubble-domain-title-text').forEach((titleEl) => {
+            titleEl.addEventListener('dblclick', (e) => {
+              e.stopPropagation();
+              const targetDomain = (titleEl as HTMLElement).dataset.domain || '';
+              const currentName = (titleEl as HTMLElement).dataset.name || '';
+              triggerEditAlias(targetDomain, currentName);
+            });
+          });
 
           // 绑定关联按钮
           itemsContainer.querySelectorAll('.btn-link-this-group').forEach((btn) => {
@@ -815,7 +872,7 @@ export default defineContentScript({
             <span class="mantra-domain-title" id="bubble-domain-title">${displayDomain}</span>
           </div>
           <div class="mantra-bubble-header-actions">
-            <button type="button" class="mantra-bubble-header-btn" id="bubble-btn-manifest" title="查看所有站点账号清单">📋 记录清单</button>
+            <button type="button" class="mantra-bubble-header-btn-manifest" id="bubble-btn-manifest" title="查看所有站点账号清单">📋 记录清单</button>
             <button type="button" class="mantra-bubble-header-btn" id="bubble-btn-link-site" title="关联当前网页到已有站点">🔗 关联</button>
           </div>
           <div class="mantra-session-status">

@@ -26,6 +26,11 @@ def log(msg, color="\033[92m"):
     reset = "\033[0m"
     print(f"{color}[MantraKey Release] {msg}{reset}")
 
+def make_crlf_gbk_bytes(text: str) -> bytes:
+    """强制使用 Windows CRLF 换行符与 GBK 编码，确保 Windows cmd.exe 打开百分之百不乱码、不截断指令"""
+    crlf_text = text.replace("\r\n", "\n").replace("\n", "\r\n")
+    return crlf_text.encode("gbk", errors="replace")
+
 def get_file_sha256(filepath):
     sha = hashlib.sha256()
     with open(filepath, "rb") as f:
@@ -66,8 +71,52 @@ def build_extension():
     target_zip = os.path.join(RELEASES_DIR, f"mantra-key-chrome-extension-v{VERSION}.zip")
     latest_zip = os.path.join(RELEASES_DIR, "mantra-key-chrome-extension-latest.zip")
 
-    shutil.copy2(src_zip, target_zip)
-    shutil.copy2(src_zip, latest_zip)
+    # 复制与补充 Native 自动更新辅助组件至发布 ZIP 包中
+    proxy_exe = os.path.join(ROOT_DIR, "target", "release", "mantra-native-proxy.exe")
+    enable_update_bat = """@echo off
+title 密诀 MantraKey - 启用扩展自动更新
+echo ========================================================
+echo   密诀 MantraKey - 原生自动更新服务一键配置
+echo ========================================================
+echo.
+echo 正在检测并注册本地 Native 代理到 Chrome 与 Edge 注册表...
+"%~dp0mantra-native-proxy.exe" --register
+echo.
+pause
+"""
+
+    readme_txt = f"""密诀 MantraKey - 浏览器扩展安装与自动更新指南 (v{VERSION})
+======================================================
+
+【第一步：解压并保存】
+将本 ZIP 压缩包解压到一个固定的本地文件夹（例如：D:\\Tools\\MantraKey-Extension），
+请勿放在临时目录，后续自动更新将直接在此目录下原地热覆盖升级。
+
+【第二步：加载到浏览器】
+1. 打开 Chrome 浏览器，在地址栏输入：chrome://extensions 并按回车；
+2. 在页面右上角打开「开发者模式」开关；
+3. 点击左上角的「加载已解压的扩展程序」按钮；
+4. 选择刚刚解压的这个文件夹。
+
+【第三步：开启静默自动更新（仅需一次）】
+在解压文件夹中，双击运行「启用自动更新.bat」。
+注册表将自动登记该目录下的 Native 代理服务（写入当前用户注册表，无需管理员权限）。
+
+大功告成！
+以后当 GitHub 发布新版本时，在插件主面板点击「⚡ 一键更新」，
+本地 Native 代理将自动下载最新版本并原地覆盖，浏览器扩展秒级自动热重载！
+"""
+
+    # 读取原本由 wxt zip 生成的内容，并写入辅助组件生成全功能分发 ZIP
+    with zipfile.ZipFile(src_zip, 'r') as zin, zipfile.ZipFile(target_zip, 'w', zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            zout.writestr(item, zin.read(item.filename))
+        if os.path.exists(proxy_exe):
+            zout.write(proxy_exe, "mantra-native-proxy.exe")
+        zout.writestr("启用自动更新.bat", make_crlf_gbk_bytes(enable_update_bat))
+        zout.writestr("README_安装与自动更新说明.txt", make_crlf_gbk_bytes(readme_txt))
+
+    shutil.copy2(target_zip, latest_zip)
 
     # 同时复制解压版本供开发者直接加载
     unpacked_src = os.path.join(out_dir, "chrome-mv3")
@@ -76,6 +125,12 @@ def build_extension():
         shutil.rmtree(unpacked_dest)
     if os.path.exists(unpacked_src):
         shutil.copytree(unpacked_src, unpacked_dest)
+        if os.path.exists(proxy_exe):
+            shutil.copy2(proxy_exe, os.path.join(unpacked_dest, "mantra-native-proxy.exe"))
+        with open(os.path.join(unpacked_dest, "启用自动更新.bat"), "wb") as bf:
+            bf.write(make_crlf_gbk_bytes(enable_update_bat))
+        with open(os.path.join(unpacked_dest, "README_安装与自动更新说明.txt"), "wb") as rf:
+            rf.write(make_crlf_gbk_bytes(readme_txt))
 
     log(f"Chrome 扩展发布包已就绪: {target_zip} ({format_size(os.path.getsize(target_zip))})")
     return target_zip
@@ -99,38 +154,39 @@ def build_desktop():
 
     # 动态创建打包内容
     host_manifest = {
-        "name": "com.mantrakey.proxy",
+        "name": "org.mantrakey.native_proxy",
         "description": "MantraKey Native Messaging Host for Chrome & Edge",
         "path": "mantra-native-proxy.exe",
         "type": "stdio",
         "allowed_origins": [
+            "chrome-extension://bggcaoiaeleahlgnglcglifibgolhief/",
             "chrome-extension://*/"
         ]
     }
 
     install_bat = """@echo off
-chcp 65001 >nul
-echo [MantraKey] 正在注册 Native Messaging Host 到当前用户注册表...
-set HOST_PATH=%~dp0com.mantrakey.proxy.json
-echo 配置清单路径: %HOST_PATH%
-
-REG ADD "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.mantrakey.proxy" /ve /t REG_SZ /d "%HOST_PATH%" /f >nul
-REG ADD "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com.mantrakey.proxy" /ve /t REG_SZ /d "%HOST_PATH%" /f >nul
-
-if %ERRORLEVEL% EQU 0 (
-    echo [成功] MantraKey 本地原生代理桩已成功注册到 Chrome 与 Edge！
-) else (
-    echo [失败] 注册表写入失败，请检查权限。
-)
+title 密诀 MantraKey - 注册原生代理通道
+echo ========================================================
+echo   密诀 MantraKey - 桌面中枢与浏览器原生代理一键配置
+echo ========================================================
+echo.
+echo 正在检测扩展并注册原生代理服务...
+"%~dp0mantra-native-proxy.exe" --register
+echo.
 pause
 """
 
     uninstall_bat = """@echo off
-chcp 65001 >nul
-echo [MantraKey] 正在卸载 Native Messaging Host 注册表配置...
-REG DELETE "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.mantrakey.proxy" /f >nul 2>&1
-REG DELETE "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com.mantrakey.proxy" /f >nul 2>&1
-echo [完成] 原生代理桩注册表项已移除。
+title 密诀 MantraKey - 卸载原生服务
+echo ========================================================
+echo   密诀 MantraKey - 原生代理服务卸载
+echo ========================================================
+echo.
+echo 正在移除 Chrome 与 Edge 的原生代理注册表项...
+REG DELETE "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\org.mantrakey.native_proxy" /f >nul 2>&1
+REG DELETE "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\org.mantrakey.native_proxy" /f >nul 2>&1
+echo [完成] 原生代理服务注册表已安全移除。
+echo.
 pause
 """
 
@@ -152,10 +208,10 @@ pause
     with zipfile.ZipFile(target_zip, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(desktop_exe, "mantra-desktop.exe")
         z.write(proxy_exe, "mantra-native-proxy.exe")
-        z.writestr("com.mantrakey.proxy.json", json.dumps(host_manifest, indent=2, ensure_ascii=False))
-        z.writestr("install_host.bat", install_bat)
-        z.writestr("uninstall_host.bat", uninstall_bat)
-        z.writestr("README.txt", readme_txt)
+        z.writestr("org.mantrakey.native_proxy.json", json.dumps(host_manifest, indent=2, ensure_ascii=False))
+        z.writestr("install_host.bat", make_crlf_gbk_bytes(install_bat))
+        z.writestr("uninstall_host.bat", make_crlf_gbk_bytes(uninstall_bat))
+        z.writestr("README.txt", make_crlf_gbk_bytes(readme_txt))
 
     shutil.copy2(target_zip, latest_zip)
     log(f"Windows 桌面端发布包已就绪: {target_zip} ({format_size(os.path.getsize(target_zip))})")

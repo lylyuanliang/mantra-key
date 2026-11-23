@@ -679,17 +679,42 @@ function setupWebDAVSync() {
       .sort()
       .map((k) => {
         const item = manifest.domains[k];
+        const hasCustom = Boolean(item.displayName && item.displayName !== item.canonicalDomain);
+        const title = hasCustom ? item.displayName : item.canonicalDomain;
+        const sub = hasCustom ? item.canonicalDomain : '';
         return `
           <div class="rule-item-row" data-domain="${item.canonicalDomain}">
-            <div style="display: flex; align-items: center;">
-              <span class="rule-item-domain">${item.canonicalDomain}</span>
-              <span class="rule-item-preset">${item.rulePreset}</span>
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span class="rule-item-domain">${hasCustom ? '🏷️ ' : ''}${title}</span>
+                <span class="rule-item-preset">${item.rulePreset}</span>
+                <button type="button" class="btn-edit-rule-alias" data-domain="${item.canonicalDomain}" data-name="${item.displayName || ''}" title="修改站点别名" style="border: none; background: transparent; cursor: pointer; font-size: 11px; opacity: 0.6; padding: 0 2px;">✏️</button>
+              </div>
+              ${sub ? `<span style="font-size: 9.5px; color: #64748b; margin-left: 16px;">🌐 ${sub}</span>` : ''}
             </div>
             <button type="button" class="btn-del-rule" data-del="${item.canonicalDomain}" title="从同步清单移除">✕</button>
           </div>
         `;
       })
       .join('');
+
+    // 绑定别名修改按钮
+    syncedRulesList.querySelectorAll('.btn-edit-rule-alias').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const d = btn.getAttribute('data-domain') || '';
+        const curName = btn.getAttribute('data-name') || '';
+        const newAlias = window.prompt(`为站点 [${d}] 设置别名:`, curName);
+        if (newAlias !== null) {
+          const item = manifest.domains[d];
+          if (item) {
+            recordDomainRule(d, item.rulePreset, newAlias.trim());
+            renderRulesList();
+            refreshStatusView();
+          }
+        }
+      });
+    });
 
     // 绑定删除按钮
     syncedRulesList.querySelectorAll('.btn-del-rule').forEach((btn) => {

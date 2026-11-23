@@ -13,5 +13,7 @@ local.properties
 .codegraph/
 scratch/
 releases/
-.kotlin/
+*.kotlin/
 *.log
+__pycache__/
+*.spec

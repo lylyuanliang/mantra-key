@@ -112,6 +112,25 @@ mantra-key/
 
 ---
 
+## 📦 快速下载、安装与使用
+
+> 📖 **完整详尽的操作指引请查阅：[《密诀 (MantraKey) 用户使用与安装配置手册》](docs/USER_GUIDE.md)**
+
+所有官方预编译产物均可在 GitHub 仓库的 **[Releases](https://github.com/lylyuanliang/mantra-key/releases)** 页面一键下载：
+
+| 客户端形态 | 分发文件名称 | 核心特性与亮点 |
+| :--- | :--- | :--- |
+| **Chrome / Edge 扩展** | `mantra-key-chrome-extension-v0.1.0.zip` | MV3 原生弹窗、多域名关联、网页自动填充、内置 Native 在线静默热更新 |
+| **Android 手机端** | `mantra-key-v0.1.0-release.apk` | 纯净精简构建 (5MB)、系统级 Autofill、独创穿透输入法 (PenetrationIME) |
+| **Windows 桌面端** | `mantra-key-desktop-v0.1.0-windows-x64.zip` | Rust + Tauri 轻量中枢、全局快捷键秒级呼出 HUD 悬浮面板、Native 代理桩 |
+
+### 快速安装 3 步走（以浏览器扩展为例）：
+1. **下载解压**：下载扩展 ZIP 包解压至本地固定工具目录（如 `D:\Tools\MantraKey`）；
+2. **加载扩展**：浏览器进入 `chrome://extensions`，开启右上角「开发者模式」，点击「加载已解压的扩展程序」，选择该目录；
+3. **开启在线自动更新（仅需一次）**：在解压目录中双击 **`启用自动更新.bat`** 即可！以后插件发现新版时，点击面板「⚡ 一键更新」即可原地静默热重载升级。
+
+---
+
 ## 🛠️ 快速上手与编译构建指南
 
 ### 环境准备
