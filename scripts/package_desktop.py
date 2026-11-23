@@ -11,7 +11,19 @@ import json
 import zipfile
 import argparse
 
+# 确保控制台字符集为 UTF-8，防止在 Windows CI/CD Runner 上打印中文字符报 UnicodeEncodeError
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 def package_desktop(desktop_exe, proxy_exe, output_zip, version="0.1.0"):
+    desktop_exe = os.path.normpath(desktop_exe)
+    proxy_exe = os.path.normpath(proxy_exe)
+    output_zip = os.path.normpath(output_zip)
+
     if not os.path.exists(desktop_exe):
         raise FileNotFoundError(f"未找到桌面端执行程序: {desktop_exe}")
     if not os.path.exists(proxy_exe):

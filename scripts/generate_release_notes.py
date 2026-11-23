@@ -11,6 +11,14 @@ import json
 import hashlib
 import argparse
 
+# 确保控制台字符集为 UTF-8，防止在 Windows CI/CD Runner 上打印中文字符报 UnicodeEncodeError
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 def get_file_sha256(filepath):
     sha = hashlib.sha256()
     with open(filepath, "rb") as f:
