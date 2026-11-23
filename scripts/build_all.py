@@ -20,7 +20,7 @@ from datetime import datetime
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 RELEASES_DIR = os.path.join(ROOT_DIR, "releases")
-VERSION = "0.1.0"
+VERSION = "0.1.1.202611231846"
 
 def log(msg, color="\033[92m"):
     reset = "\033[0m"

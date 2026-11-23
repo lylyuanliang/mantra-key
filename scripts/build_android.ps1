@@ -121,7 +121,7 @@ if (-not (Test-Path $ReleaseDir)) {
 
 $AndroidDir = Join-Path $ProjectRoot "apps\android"
 $AppGradleKts = Join-Path $AndroidDir "app\build.gradle.kts"
-$Version = "0.1.0"
+$Version = "0.1.1.202611231846"
 if (Test-Path $AppGradleKts) {
     $Content = Get-Content $AppGradleKts -Raw
     if ($Content -match 'versionName\s*=\s*"([^"]+)"') {

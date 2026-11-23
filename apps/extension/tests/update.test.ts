@@ -6,7 +6,7 @@ import { compareVersions, performExtensionAutoUpdate, type ExtensionUpdateInfo }
 (globalThis as any).chrome = {
   runtime: {
     id: 'test-ext-id',
-    getManifest: () => ({ version: '0.1.0' }),
+    getManifest: () => ({ version: '0.1.1', version_name: '0.1.1.202611231846' }),
     reload: () => {},
     sendMessage: (msg: any, cb: (res: any) => void) => {
       if (msg.action === 'EXECUTE_EXTENSION_AUTO_UPDATE') {
@@ -31,6 +31,10 @@ test('compareVersions 应该准确对比语义化版本号', () => {
   assert.strictEqual(compareVersions('0.1.0', '0.1.0'), 0);
   assert.strictEqual(compareVersions('0.2.0', '0.1.0'), -1);
   assert.strictEqual(compareVersions('1.0.0', '0.9.9'), -1);
+  // 4位时间戳版本测试
+  assert.strictEqual(compareVersions('0.1.1.202611231846', '0.1.1.202611231900'), 1);
+  assert.strictEqual(compareVersions('0.1.1.202611231900', '0.1.1.202611231846'), -1);
+  assert.strictEqual(compareVersions('0.1.1.202611231846', '0.1.1.202611231846'), 0);
 });
 
 test('performExtensionAutoUpdate 成功时应调用原生更新并触发热重载', async () => {

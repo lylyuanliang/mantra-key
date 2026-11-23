@@ -99,7 +99,8 @@ export function compareVersions(current: string, latest: string): number {
  * 获取最新版本元数据并比对当前插件版本
  */
 export async function checkExtensionUpdate(): Promise<ExtensionUpdateInfo | null> {
-  const currentVersion = (chrome.runtime?.getManifest?.()?.version || '0.1.0').trim();
+  const manifest = chrome.runtime?.getManifest?.();
+  const currentVersion = ((manifest as any)?.version_name || manifest?.version || '0.1.1.202611231846').trim();
   const timestamp = Date.now();
 
   const candidateUrls = [
