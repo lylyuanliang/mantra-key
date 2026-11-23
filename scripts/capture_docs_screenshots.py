@@ -3,6 +3,7 @@ import http.server
 import socketserver
 import threading
 import os
+import time
 from PIL import Image, ImageDraw
 from playwright.async_api import async_playwright
 
@@ -40,27 +41,47 @@ async def capture_all():
 
         # 注入拟真且脱敏的本地扩展存储与运行时消息拦截
         await page.add_init_script("""
+            const now = Date.now();
             const mockStorage = {
+                'mantra_active_session': {
+                    isUnlocked: true,
+                    mantra: 'MySuperSecretMantra2026',
+                    canary: 'EFA4500F',
+                    expiresAt: now + 890000
+                },
+                'mantra_meta_github.com': {
+                    displayName: 'GitHub 极速代码库',
+                    updatedAt: now
+                },
                 'mantra_accs_github.com': [{
                     username: 'dev_engineer@github.com',
                     version: 1,
                     rulePreset: 'standard-16',
                     serviceKey: 'github.com',
+                    displayName: 'GitHub 极速代码库',
                     tag: 'Work',
-                    createdAt: 1732000000000,
-                    updatedAt: 1732000000000
+                    createdAt: now - 3600000,
+                    updatedAt: now - 3600000
                 }],
+                'mantra_meta_三毛机场.com': {
+                    displayName: '三毛机场专线',
+                    updatedAt: now
+                },
                 'mantra_accs_三毛机场.com': [{
                     username: 'user_vip@gmail.com',
                     version: 1,
                     rulePreset: 'standard-16',
                     serviceKey: '三毛机场',
                     displayName: '三毛机场专线',
-                    aliases: ['*.三毛机场.com', 'cleanip.io'],
+                    aliases: ['*.三毛机场.com', 'cleanip.io', 'sub.sanmao.net'],
                     tag: 'Proxy',
-                    createdAt: 1732000000000,
-                    updatedAt: 1732000000000
+                    createdAt: now - 7200000,
+                    updatedAt: now - 7200000
                 }],
+                'mantra_meta_dashboard.cpolar.com': {
+                    displayName: 'Cpolar 内网穿透',
+                    updatedAt: now
+                },
                 'mantra_accs_dashboard.cpolar.com': [{
                     username: 'developer@work.org',
                     version: 1,
@@ -68,15 +89,16 @@ async def capture_all():
                     serviceKey: 'cpolar',
                     displayName: 'Cpolar 内网穿透',
                     tag: 'Dev',
-                    createdAt: 1732000000000,
-                    updatedAt: 1732000000000
+                    createdAt: now - 86400000,
+                    updatedAt: now - 86400000
                 }],
                 'mantra_webdav_config': {
                     url: 'https://dav.jianguoyun.com/dav/mantra-key',
                     username: 'user@example.com',
                     password: 'masked_app_password',
                     remoteFilename: 'mantra_sync.mkey',
-                    lastSyncTime: 1732351237000
+                    syncPassword: 'DemoSyncPassword2026',
+                    lastSyncTime: now - 1800000
                 }
             };
 
@@ -84,6 +106,7 @@ async def capture_all():
                 storage: {
                     local: {
                         get: (keys, cb) => {
+                            if (!keys) return cb ? cb({ ...mockStorage }) : Promise.resolve({ ...mockStorage });
                             if (typeof keys === 'string') {
                                 const res = { [keys]: mockStorage[keys] };
                                 return cb ? cb(res) : Promise.resolve(res);
@@ -125,7 +148,11 @@ async def capture_all():
         await page.goto(f'http://localhost:{PORT}/popup.html')
         await page.wait_for_timeout(600)
 
-        # 模拟输入主口令，触发金丝雀指纹与密码现场计算显示
+        # 模拟填充主面板账号与口令，触发完整派生状态与金丝雀指纹展示
+        input_user = page.locator('#new-acc-user')
+        if await input_user.count() > 0:
+            await input_user.fill('dev_engineer@github.com')
+
         input_mantra = page.locator('#input-master-mantra')
         if await input_mantra.count() > 0:
             await input_mantra.fill('MySuperSecretMantra2026')
@@ -148,10 +175,11 @@ async def capture_all():
                 await tab_webdav.click()
                 await page.wait_for_timeout(300)
 
-            # 填充示范 WebDAV 地址与账号展示
+            # 填充示范 WebDAV 地址、账号与独立加密密码
             await page.fill('#sync-input-url', 'https://dav.jianguoyun.com/dav/mantra-key')
             await page.fill('#sync-input-user', 'user@example.com')
             await page.fill('#sync-input-pass', '••••••••••••••••')
+            await page.fill('#sync-input-sync-pass', '••••••••••••')
             await page.wait_for_timeout(200)
 
             webdav_preview_path = os.path.join(ASSETS_DIR, "webdav_sync.png")
@@ -168,7 +196,7 @@ async def capture_all():
         btn_manifest = page.locator('#btn-open-all-manifest')
         if await btn_manifest.count() > 0:
             await btn_manifest.click()
-            await page.wait_for_timeout(400)
+            await page.wait_for_timeout(500)
             manifest_preview_path = os.path.join(ASSETS_DIR, "manifest_preview.png")
             await page.screenshot(path=manifest_preview_path)
             print(f"[OK] 生成清单总览界面截图: {manifest_preview_path}")
@@ -179,17 +207,54 @@ async def capture_all():
         android_preview_path = os.path.join(ASSETS_DIR, "android_preview.jpg")
         try:
             android_page = await browser.new_page(viewport={'width': 412, 'height': 892}, device_scale_factor=2)
+            await android_page.add_init_script("""
+                localStorage.setItem('mk_onboarding_guided', 'true');
+                localStorage.setItem('mantra_webdav_config', JSON.stringify({
+                    serverUrl: 'https://dav.jianguoyun.com/dav/mantra-key',
+                    username: 'user@example.com',
+                    password: 'masked_password',
+                    remoteFilename: 'mantra_sync.mkey'
+                }));
+                localStorage.setItem('mantra_webdav_sync_info', JSON.stringify({
+                    lastSyncTime: Date.now() - 3600000,
+                    status: 'success',
+                    mergedCount: 3
+                }));
+                localStorage.setItem('mantra_webdav_rules_manifest', JSON.stringify({
+                    version: 1,
+                    updatedAt: Date.now() - 3600000,
+                    rules: [
+                        { domain: 'github.com', accounts: [{ username: 'dev_engineer@github.com', version: 1, rule: 'standard-16' }] },
+                        { domain: '三毛机场.com', displayName: '三毛机场专线', accounts: [{ username: 'user_vip@gmail.com', version: 1, rule: 'standard-16' }] },
+                        { domain: 'dashboard.cpolar.com', displayName: 'Cpolar 内网穿透', accounts: [{ username: 'developer@work.org', version: 1, rule: 'standard-16' }] }
+                    ]
+                }));
+            """)
             await android_page.goto('http://localhost:5174/', timeout=6000)
-            await android_page.wait_for_timeout(800)
+            await android_page.wait_for_timeout(600)
 
-            # 模拟在 Android 端输入口令展示完整功能
-            input_el = android_page.locator('input[type="password"], input[placeholder*="口令"]')
-            if await input_el.count() > 0:
-                await input_el.first.fill('MySuperSecretMantra2026')
-                await android_page.wait_for_timeout(400)
+            await android_page.wait_for_timeout(1200)
+
+            # 移除引导浮层与开发反馈悬浮组件，呈现纯净官方应用界面
+            await android_page.evaluate("""() => {
+                document.getElementById('onboarding-overlay')?.remove();
+                document.getElementById('ai-feedback-trigger')?.remove();
+                document.querySelector('agent-feedback-widget')?.remove();
+            }""")
+
+            # 模拟在 Android 端输入口令与域名，触发实时密码计算
+            input_m = android_page.locator('#input-mantra')
+            if await input_m.count() > 0:
+                await input_m.fill('MySuperSecretMantra2026')
+
+            input_d = android_page.locator('#input-domain')
+            if await input_d.count() > 0:
+                await input_d.fill('github.com')
+
+            await android_page.wait_for_timeout(400)
 
             # 存为高质量 JPEG
-            await android_page.screenshot(path=android_preview_path, type='jpeg', quality=90)
+            await android_page.screenshot(path=android_preview_path, type='jpeg', quality=92)
             print(f"[OK] 生成 Android 移动端截图: {android_preview_path}")
         except Exception as e:
             print(f"[Warn] 捕获 Android 页面异常: {e}")

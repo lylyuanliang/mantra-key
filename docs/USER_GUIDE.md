@@ -34,7 +34,7 @@
 密诀 Chrome MV3 扩展支持在任意 Chromium 内核浏览器（Google Chrome、Microsoft Edge、Brave、360极速浏览器、搜狗浏览器等）中运行，并内置了**在线静默一键热更新**服务。
 
 #### 步骤 1：下载并解压到固定工具目录
-1. 从 Releases 下载扩展压缩包：`mantra-key-chrome-extension-v0.1.0.zip`；
+1. 从 Releases 下载扩展压缩包：`mantra-key-chrome-extension-v0.1.1.202611231846.zip`；
 2. 将其解压到一个您日常存放常用工具的**固定目录**（例如：`D:\Tools\MantraKey` 或 `C:\Tools\MantraKey`）；
 > ⚠️ **注意**：请不要解压在“系统临时目录”或随时会被清理的“下载文件夹”中，因为后续自动更新时，Native 代理会在该目录下原地直接热覆盖。
 
@@ -73,7 +73,7 @@
 </div>
 
 #### 步骤 1：安装 APK
-从 Releases 下载 `mantra-key-v0.1.0-release.apk`，在手机上允许安装未知应用并完成安装。
+从 Releases 下载 `mantra-key-v0.1.1.202611231846-release.apk`，在手机上允许安装未知应用并完成安装。
 
 #### 步骤 2：开启系统级自动填充 (AutofillService)
 1. 打开密诀 App，进入「设置」；
@@ -91,7 +91,7 @@
 
 ### 3. Windows 桌面中枢与 HUD 快捷面板
 
-1. 从 Releases 下载 `mantra-key-desktop-v0.1.0-windows-x64.zip`；
+1. 从 Releases 下载 `mantra-key-desktop-v0.1.1.202611231846-windows-x64.zip`；
 2. 解压至固定文件夹，双击运行里面的 `install_host.bat` 建立本地原生中继通道；
 3. 运行 `mantra-desktop.exe`，按下全局快捷键即可在任何界面秒级唤起 HUD 暗黑悬浮卡片。
 

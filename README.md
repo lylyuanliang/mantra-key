@@ -123,9 +123,9 @@ mantra-key/
 
 | 客户端形态 | 分发文件名称 | 核心特性与亮点 |
 | :--- | :--- | :--- |
-| **Chrome / Edge 扩展** | `mantra-key-chrome-extension-v0.1.0.zip` | MV3 原生弹窗、多域名关联、网页自动填充、内置 Native 在线静默热更新 |
-| **Android 手机端** | `mantra-key-v0.1.0-release.apk` | 纯净精简构建 (5MB)、系统级 Autofill、独创穿透输入法 (PenetrationIME) |
-| **Windows 桌面端** | `mantra-key-desktop-v0.1.0-windows-x64.zip` | Rust + Tauri 轻量中枢、全局快捷键秒级呼出 HUD 悬浮面板、Native 代理桩 |
+| **Chrome / Edge 扩展** | `mantra-key-chrome-extension-v0.1.1.202611231846.zip` | MV3 原生弹窗、多域名关联、网页自动填充、内置 Native 在线静默热更新 |
+| **Android 手机端** | `mantra-key-v0.1.1.202611231846-release.apk` | 纯净精简构建 (5MB)、系统级 Autofill、独创穿透输入法 (PenetrationIME) |
+| **Windows 桌面端** | `mantra-key-desktop-v0.1.1.202611231846-windows-x64.zip` | Rust + Tauri 轻量中枢、全局快捷键秒级呼出 HUD 悬浮面板、Native 代理桩 |
 
 ### 快速安装 3 步走（以浏览器扩展为例）：
 1. **下载解压**：下载扩展 ZIP 包解压至本地固定工具目录（如 `D:\Tools\MantraKey`）；
@@ -168,8 +168,8 @@ pnpm --filter @mantra-key/extension build
 powershell -ExecutionPolicy Bypass -File scripts/build_android.ps1 -NoPause
 
 # 编译完成后，输出位于 releases/ 目录：
-# - mantra-key-v0.1.0-debug.apk   (调试版)
-# - mantra-key-v0.1.0-release.apk (发布签名版)
+# - mantra-key-v0.1.1.202611231846-debug.apk   (调试版)
+# - mantra-key-v0.1.1.202611231846-release.apk (发布签名版)
 ```
 
 ---
