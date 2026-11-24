@@ -123,15 +123,31 @@ export default defineBackground(() => {
   chrome.tabs.onActivated.addListener(async (activeInfo) => {
     try {
       const tab = await chrome.tabs.get(activeInfo.tabId);
-      if (tab?.url) {
-        const domain = extractDomain(tab.url);
-        // 使用带回调的安全调用并就地消耗 runtime.lastError，杜绝 Chrome 报错
-        chrome.tabs.sendMessage(activeInfo.tabId, {
-          action: 'TAB_DOMAIN_ACTIVATED',
-          domain,
-        }, () => {
-          const _safe = chrome.runtime.lastError;
-        });
+      const rawUrl = tab?.url || '';
+      // 严格跳过内部受保护页面、扩展页与空白页，杜绝触发“Cannot access a chrome:// URL”报错
+      if (
+        !rawUrl ||
+        rawUrl.startsWith('chrome://') ||
+        rawUrl.startsWith('edge://') ||
+        rawUrl.startsWith('about:') ||
+        rawUrl.startsWith('chrome-extension://') ||
+        rawUrl.startsWith('view-source:')
+      ) {
+        return;
+      }
+
+      const domain = extractDomain(rawUrl);
+      if (domain) {
+        chrome.tabs.sendMessage(
+          activeInfo.tabId,
+          {
+            action: 'TAB_DOMAIN_ACTIVATED',
+            domain,
+          },
+          () => {
+            const _safe = chrome.runtime.lastError;
+          }
+        );
       }
     } catch {
       // 目标页面未载入 content script 或无权限时安全忽略

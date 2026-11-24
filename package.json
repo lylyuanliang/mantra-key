@@ -1,6 +1,6 @@
 {
   "name": "mantra-key-monorepo",
-  "version": "0.1.1.202611241820",
+  "version": "0.1.1.202611241925",
   "private": true,
   "scripts": {
     "build:all": "python scripts/build_all.py",

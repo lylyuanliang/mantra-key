@@ -85,7 +85,6 @@ def build_extension():
     # 复制与补充 Native 自动更新辅助组件至发布 ZIP 包中
     proxy_exe = os.path.join(ROOT_DIR, "target", "release", "mantra-native-proxy.exe")
     enable_update_bat = """@echo off
-chcp 65001 > nul
 title 密诀 MantraKey - 启用扩展自动更新
 echo ========================================================
 echo   密诀 MantraKey - 原生自动更新服务一键配置
