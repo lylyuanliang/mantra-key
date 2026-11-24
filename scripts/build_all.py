@@ -20,7 +20,18 @@ from datetime import datetime
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 RELEASES_DIR = os.path.join(ROOT_DIR, "releases")
-VERSION = "0.1.1.202611231846"
+
+def get_project_version() -> str:
+    pkg_path = os.path.join(ROOT_DIR, "package.json")
+    if os.path.exists(pkg_path):
+        try:
+            with open(pkg_path, "r", encoding="utf-8") as f:
+                return json.load(f).get("version", "0.1.1.202611241203")
+        except Exception:
+            pass
+    return "0.1.1.202611241203"
+
+VERSION = get_project_version()
 
 def log(msg, color="\033[92m"):
     reset = "\033[0m"
@@ -74,6 +85,7 @@ def build_extension():
     # 复制与补充 Native 自动更新辅助组件至发布 ZIP 包中
     proxy_exe = os.path.join(ROOT_DIR, "target", "release", "mantra-native-proxy.exe")
     enable_update_bat = """@echo off
+chcp 65001 > nul
 title 密诀 MantraKey - 启用扩展自动更新
 echo ========================================================
 echo   密诀 MantraKey - 原生自动更新服务一键配置
@@ -159,8 +171,10 @@ def build_desktop():
         "path": "mantra-native-proxy.exe",
         "type": "stdio",
         "allowed_origins": [
+            "chrome-extension://hejmkhaefdlhkhebpjnijplphhabkbgh/",
+            "chrome-extension://maocgdjdlppoipddolffccjbnniijbne/",
             "chrome-extension://bggcaoiaeleahlgnglcglifibgolhief/",
-            "chrome-extension://*/"
+            "chrome-extension://fpceefangimjbfppoomcngkcdekfnloi/"
         ]
     }
 
@@ -172,6 +186,17 @@ echo ========================================================
 echo.
 echo 正在检测扩展并注册原生代理服务...
 "%~dp0mantra-native-proxy.exe" --register
+if %errorlevel% neq 0 goto :manual_reg
+goto :end
+
+:manual_reg
+echo.
+echo [提示] 尝试通过系统注册表直接登记原生通道...
+REG ADD "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\org.mantrakey.native_proxy" /ve /t REG_SZ /d "%~dp0org.mantrakey.native_proxy.json" /f >nul 2>&1
+REG ADD "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\org.mantrakey.native_proxy" /ve /t REG_SZ /d "%~dp0org.mantrakey.native_proxy.json" /f >nul 2>&1
+echo [OK] 注册表原生通道已直接登记完成。
+
+:end
 echo.
 pause
 """
@@ -269,13 +294,25 @@ def generate_checksums_and_metadata():
         f.write("\n".join(sums) + "\n")
     log(f"SHA256SUMS.txt 已生成: {sums_file}")
 
+    # 读取现有的 public/version.json 保留其精确的更新日志 (changelog)
+    root_public_version = os.path.join(ROOT_DIR, "public", "version.json")
+    existing_changelog = "1. 浏览器扩展永久固定公钥与 Extension ID，彻底解决跨电脑跨目录加载 Native Messaging 鉴权失败问题\n2. 桌面原生代理桩（Native Host）全自动扫描 Chrome/Edge 用户数据，动态自适应已装扩展 ID\n3. 桌面中枢常驻守护仪表盘重构，解决双击闪退无反应，提供 15 分钟安全会话与按键仿真\n4. 扩展端运行时未捕获异常全面治理，补全更新源 host_permissions，彻底消除扩展管理页红色“错误”按钮\n5. Windows 批处理原生 ANSI/GBK 字符集治理，消除终端乱码与命令截断"
+    if os.path.exists(root_public_version):
+        try:
+            with open(root_public_version, "r", encoding="utf-8") as f:
+                pj = json.load(f)
+                if pj.get("changelog"):
+                    existing_changelog = pj["changelog"]
+        except Exception:
+            pass
+
     # 读取或构建 version.json
     version_file = os.path.join(RELEASES_DIR, "version.json")
     v_data = {
         "version": VERSION,
         "versionTag": f"v{VERSION}",
         "title": f"密诀 MantraKey v{VERSION} 全端正式发布版",
-        "changelog": "1. 达成 Chrome Web Store MV3 商店规范 100% 合规与 ZIP 格式封装\n2. 新增 Windows 桌面中枢与浏览器原生代理桩一键部署包\n3. Android 移动端具备 Zero-DCE 纯净精简构建与双向安全输入法\n4. 提供全端统一构建目录 releases/ 与 SHA-256 完整性防篡改校验",
+        "changelog": existing_changelog,
         "publishedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "htmlUrl": f"https://github.com/lylyuanliang/mantra-key/releases/tag/v{VERSION}",
         "artifacts": artifacts_meta,
@@ -292,7 +329,11 @@ def generate_checksums_and_metadata():
         json.dump(v_data, f, indent=4, ensure_ascii=False)
     log(f"version.json 已生成: {version_file}")
 
-    # 同步至 Android web/public 目录供本地热启动直连下载
+    # 同时同步至根目录 public/version.json 与 Android web/public 目录供线上与本地热启动直连下载
+    with open(root_public_version, "w", encoding="utf-8") as f:
+        json.dump(v_data, f, indent=4, ensure_ascii=False)
+    log(f"已同步更新至根目录 public/version.json: {root_public_version}")
+
     web_public = os.path.join(ROOT_DIR, "apps", "android", "web", "public")
     if os.path.exists(web_public):
         shutil.copy2(sums_file, os.path.join(web_public, "SHA256SUMS.txt"))

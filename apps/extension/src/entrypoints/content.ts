@@ -760,6 +760,7 @@ export default defineContentScript({
               rule_preset: targetAcc.rulePreset,
             },
           }, (res) => {
+            const _err = chrome.runtime.lastError;
             const pwd = res?.data?.derived_password;
             if (pwd) {
               injectInputValue(anchorInput, pwd);
@@ -826,6 +827,7 @@ export default defineContentScript({
               rule_preset: rulePreset,
             },
           }, async (deriveRes) => {
+            const _err = chrome.runtime.lastError;
             const pwd = deriveRes?.data?.derived_password;
             if (pwd) {
               injectInputValue(anchorInput, pwd);

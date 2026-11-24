@@ -42,8 +42,10 @@ def package_desktop(desktop_exe, proxy_exe, output_zip, version="0.1.0"):
         "path": "mantra-native-proxy.exe",
         "type": "stdio",
         "allowed_origins": [
+            "chrome-extension://hejmkhaefdlhkhebpjnijplphhabkbgh/",
+            "chrome-extension://maocgdjdlppoipddolffccjbnniijbne/",
             "chrome-extension://bggcaoiaeleahlgnglcglifibgolhief/",
-            "chrome-extension://*/"
+            "chrome-extension://fpceefangimjbfppoomcngkcdekfnloi/"
         ]
     }
 
@@ -55,6 +57,17 @@ echo ========================================================
 echo.
 echo 正在检测扩展并注册原生代理服务...
 "%~dp0mantra-native-proxy.exe" --register
+if %errorlevel% neq 0 goto :manual_reg
+goto :end
+
+:manual_reg
+echo.
+echo [提示] 尝试通过系统注册表直接登记原生通道...
+REG ADD "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\org.mantrakey.native_proxy" /ve /t REG_SZ /d "%~dp0org.mantrakey.native_proxy.json" /f >nul 2>&1
+REG ADD "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\org.mantrakey.native_proxy" /ve /t REG_SZ /d "%~dp0org.mantrakey.native_proxy.json" /f >nul 2>&1
+echo [OK] 注册表原生通道已直接登记完成。
+
+:end
 echo.
 pause
 """

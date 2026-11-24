@@ -711,7 +711,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 1. 获取当前活动标签页真实域名并转换为友好 Unicode
   try {
     const domainRes = await new Promise<{ domain?: string; title?: string }>((resolve) => {
-      chrome.runtime.sendMessage({ action: 'GET_CURRENT_DOMAIN' }, resolve);
+      chrome.runtime.sendMessage({ action: 'GET_CURRENT_DOMAIN' }, (res) => {
+        const _err = chrome.runtime.lastError;
+        resolve(res);
+      });
     });
     if (domainRes?.domain) {
       currentDomain = domainRes.domain;
@@ -1486,6 +1489,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             action: 'AUTOFILL_ACTIVE_TAB',
             payload: { username: acc.username, password: pwd },
           }, () => {
+            const _err = chrome.runtime.lastError;
             closeManifestModal();
             showToast(`已向网页填入 [${acc.username}] 与强密码`);
           });

@@ -208,6 +208,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -227,7 +229,7 @@ jobs:
           elif [ "${{ github.ref_type }}" = "tag" ]; then
             TAG="${{ github.ref_name }}"
           else
-            TAG=$(node -p "require('./releases/version.json').versionTag || ('v' + require('./releases/version.json').version)")
+            TAG=$(node -e "const fs = require('fs'); const p = fs.existsSync('./public/version.json') ? require('./public/version.json') : require('./package.json'); console.log(p.versionTag || ('v' + p.version));")
           fi
           echo "Resolved Tag: $TAG"
           echo "TAG=$TAG" >> $GITHUB_ENV
@@ -276,7 +278,7 @@ jobs:
       - name: Generate Release Notes
         id: release_notes
         run: |
-          python scripts/generate_release_notes.py --artifacts-dir release-assets --output release_notes.md --tag "${{ env.TAG }}"
+          python scripts/generate_release_notes.py --artifacts-dir release-assets --output release_notes.md --tag "${{ env.TAG }}" --version-json public/version.json
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

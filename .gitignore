@@ -17,3 +17,5 @@ releases/
 *.log
 __pycache__/
 *.spec
+*.pem
+*.key

@@ -10,6 +10,7 @@ import sys
 import json
 import hashlib
 import argparse
+import subprocess
 
 # 确保控制台字符集为 UTF-8，防止在 Windows CI/CD Runner 上打印中文字符报 UnicodeEncodeError
 if hasattr(sys.stdout, 'reconfigure'):
@@ -33,22 +34,83 @@ def format_size(bytes_size):
         return f"{bytes_size / 1024:.1f} KB"
     return f"{bytes_size} B"
 
-def generate_notes(artifacts_dir, output_path, tag="v0.1.0", version_json_path="releases/version.json"):
-    version_info = {}
-    if os.path.exists(version_json_path):
-        try:
-            with open(version_json_path, "r", encoding="utf-8") as f:
-                version_info = json.load(f)
-        except Exception as e:
-            print(f"Warning: failed to read {version_json_path}: {e}")
+def extract_changelog(tag, version_json_path="public/version.json"):
+    """
+    智能提取版本更新日志：
+    1. 优先读取 public/version.json (若版本匹配且包含非模板更新内容)；
+    2. 自动从 Git 提取上一 Tag 到当前 Tag 之间的提交记录作为增量动态日志；
+    3. 杜绝多次发版日志一模一样、内容陈旧的问题。
+    """
+    candidates = [
+        version_json_path,
+        "public/version.json",
+        "releases/version.json",
+        os.path.join(os.path.dirname(__file__), "..", "public", "version.json"),
+        os.path.join(os.path.dirname(__file__), "..", "releases", "version.json"),
+    ]
 
-    title = f"密诀 MantraKey {tag} 全端正式发布版"
-    changelog = version_info.get("changelog", (
-        "1. 达成 Google Chrome Web Store MV3 商店规范 100% 合规与 ZIP 格式封装；\n"
-        "2. 新增 Windows 桌面中枢与浏览器原生代理桩一键部署包 (install_host.bat)；\n"
-        "3. Android 移动端具备 Zero-DCE 纯净精简构建与双向安全输入法/自动填充服务；\n"
-        "4. 提供全端构建产物统一汇聚管理 (releases/) 与 SHA-256 完整性防篡改指纹校验。"
-    ))
+    version_info = {}
+    for p in candidates:
+        if p and os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if data:
+                        version_info = data
+                        if data.get("versionTag") == tag or (tag and tag.lstrip("v") == data.get("version")):
+                            break
+            except Exception as e:
+                print(f"Warning: failed to read {p}: {e}")
+
+    json_changelog = version_info.get("changelog", "").strip()
+    is_initial_template = "1. 达成 Google Chrome Web Store MV3" in json_changelog
+    has_valid_json_changelog = bool(json_changelog and not is_initial_template)
+
+    # 从 Git Commit 历史动态提取增量日志
+    git_commits = []
+    try:
+        tags_raw = subprocess.check_output(
+            ["git", "tag", "--sort=-creatordate"],
+            stderr=subprocess.DEVNULL
+        ).decode("utf-8", errors="ignore").strip().splitlines()
+
+        prev_tag = None
+        for t in tags_raw:
+            t = t.strip()
+            if t and t != tag:
+                prev_tag = t
+                break
+
+        if prev_tag:
+            log_range = f"{prev_tag}..{tag}" if tag in tags_raw else f"{prev_tag}..HEAD"
+            cmd = ["git", "log", log_range, "--no-merges", "--pretty=format:%s"]
+        else:
+            cmd = ["git", "log", "-n", "8", "--no-merges", "--pretty=format:%s"]
+
+        raw_lines = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode("utf-8", errors="ignore").strip().splitlines()
+
+        for line in raw_lines:
+            line = line.strip()
+            if not line or "chore(release)" in line or line.startswith("Merge "):
+                continue
+            git_commits.append(line)
+    except Exception as e:
+        print(f"Notice: git log changelog extraction skipped: {e}")
+
+    if has_valid_json_changelog:
+        result = json_changelog
+        if git_commits:
+            result += "\n\n**相关提交变更：**\n" + "\n".join(f"- {c}" for c in git_commits[:10])
+        return result, version_info
+    elif git_commits:
+        return "\n".join(f"{i+1}. {c}" for i, c in enumerate(git_commits[:15])), version_info
+    else:
+        return "1. 常规功能升级与系统稳定性优化；\n2. 全端交互体验升级与已知缺陷修复。", version_info
+
+def generate_notes(artifacts_dir, output_path, tag="v0.1.0", version_json_path="public/version.json"):
+    changelog, version_info = extract_changelog(tag, version_json_path)
+
+    title = version_info.get("title") or f"密诀 MantraKey {tag} 全端正式发布版"
 
     # 扫描产物并提取大小与 SHA256
     files_in_dir = os.listdir(artifacts_dir) if os.path.exists(artifacts_dir) else []
@@ -154,7 +216,7 @@ if __name__ == "__main__":
     parser.add_argument("--artifacts-dir", default="releases", help="Directory containing release artifacts")
     parser.add_argument("--output", default="release_notes.md", help="Output release notes markdown file")
     parser.add_argument("--tag", default="v0.1.0", help="Release tag")
-    parser.add_argument("--version-json", default="releases/version.json", help="Path to version.json")
+    parser.add_argument("--version-json", default="public/version.json", help="Path to version.json")
     args = parser.parse_args()
 
     generate_notes(args.artifacts_dir, args.output, args.tag, args.version_json)

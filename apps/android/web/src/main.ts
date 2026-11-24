@@ -23,6 +23,98 @@ import {
   type WebDAVConfig
 } from './services/webdavSyncService';
 
+/**
+ * RFC 3492 Punycode 解码器，用于将 xn-- 开头的国际化域名还原为人类可读的 Unicode 中文
+ */
+function decodePunycodePart(input: string): string {
+  const maxInt = 2147483647;
+  const base = 36;
+  const tMin = 1;
+  const tMax = 26;
+  const skew = 38;
+  const damp = 700;
+  const initialBias = 72;
+  const initialN = 128;
+  const delimiter = '-';
+
+  function adapt(delta: number, numPoints: number, firstTime: boolean): number {
+    let k = 0;
+    delta = firstTime ? Math.floor(delta / damp) : delta >> 1;
+    delta += Math.floor(delta / numPoints);
+    for (; delta > ((base - tMin) * tMax) >> 1; k += base) {
+      delta = Math.floor(delta / (base - tMin));
+    }
+    return Math.floor(k + ((base - tMin + 1) * delta) / (delta + skew));
+  }
+
+  function decodeDigit(cp: number): number {
+    return cp - 48 < 10 ? cp - 22 : cp - 65 < 26 ? cp - 65 : cp - 97 < 26 ? cp - 97 : base;
+  }
+
+  const output: number[] = [];
+  const basic = input.lastIndexOf(delimiter);
+  let n = initialN;
+  let i = 0;
+  let bias = initialBias;
+
+  if (basic > 0) {
+    for (let j = 0; j < basic; ++j) {
+      output.push(input.charCodeAt(j));
+    }
+  }
+
+  let index = basic > 0 ? basic + 1 : 0;
+  while (index < input.length) {
+    const oldi = i;
+    let w = 1;
+    for (let k = base; ; k += base) {
+      if (index >= input.length) return input;
+      const digit = decodeDigit(input.charCodeAt(index++));
+      if (digit >= base) return input;
+      if (digit > Math.floor((maxInt - i) / w)) return input;
+      i += digit * w;
+      const t = k <= bias ? tMin : k >= bias + tMax ? tMax : k - bias;
+      if (digit < t) break;
+      if (w > Math.floor(maxInt / (base - t))) return input;
+      w *= base - t;
+    }
+    const out = output.length + 1;
+    bias = adapt(i - oldi, out, oldi === 0);
+    if (Math.floor(i / out) > maxInt - n) return input;
+    n += Math.floor(i / out);
+    i %= out;
+    output.splice(i++, 0, n);
+  }
+  return String.fromCodePoint(...output);
+}
+
+export function toUnicodeDomain(domain: string): string {
+  if (!domain || typeof domain !== 'string') return '';
+  return domain
+    .split('.')
+    .map((part) => (part.startsWith('xn--') ? decodePunycodePart(part.slice(4)) : part))
+    .join('.');
+}
+
+/**
+ * 优雅的全局浮动 Toast 通知
+ */
+function showToast(message: string, duration = 2500): void {
+  const existing = document.querySelector('.toast-container');
+  if (existing) {
+    existing.remove();
+  }
+  const toast = document.createElement('div');
+  toast.className = 'toast-container';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transition = 'opacity 0.25s ease';
+    setTimeout(() => toast.remove(), 250);
+  }, duration);
+}
+
 // 页面 DOM 骨架初始化
 function mountApp() {
   const appRoot = document.getElementById('app');
@@ -127,7 +219,39 @@ function mountApp() {
           </div>
         </section>
 
-        <!-- 2. WebDAV 多端端到端加密同步面板 (E2EE + CRDT) -->
+        <!-- 2. 已存站点与密码速查清单 (一等公民核心资产区) -->
+        <section class="card vault-card" id="card-vault-list">
+          <div class="card-header">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="card-title">📚 已存站点与密码速查</span>
+              <span class="vault-count-badge" id="count-synced-rules">0</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <button type="button" class="btn-vault-header-action" id="btn-refresh-vault" title="刷新列表">🔄 刷新</button>
+            </div>
+          </div>
+
+          <div class="vault-body">
+            <!-- 实时快速搜索行 -->
+            <div class="vault-search-row">
+              <span class="vault-search-icon">🔍</span>
+              <input
+                type="text"
+                id="input-vault-search"
+                class="vault-search-input"
+                placeholder="搜索域名、别名、用户名或规则..."
+              />
+              <button type="button" class="btn-clear-vault-search" id="btn-clear-vault-search" style="display: none;">✕</button>
+            </div>
+
+            <!-- 站点清单容器 (默认展开，触手可及) -->
+            <div class="vault-sites-list" id="synced-rules-list">
+              <!-- 动态渲染站点卡片 -->
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. WebDAV 多端端到端加密同步面板 (E2EE + CRDT) -->
         <section class="card sync-card" id="card-webdav-sync">
           <div class="card-header">
             <div style="display: flex; align-items: center; gap: 8px;">
@@ -225,17 +349,6 @@ function mountApp() {
 
               <div class="sync-hint-box">
                 💡 <strong>独立同步加密保障：</strong>支持设置独立同步加密密码。若填写，清单在本地使用 AES-256-GCM 强加密后再上传至云端；若留空，则以明文信封存储。多端支持无缝平滑自适应合并与升格。
-              </div>
-            </div>
-
-            <!-- 已同步规则清单折叠区 -->
-            <div class="synced-rules-section">
-              <div class="synced-rules-header" id="btn-toggle-rules-list">
-                <span class="synced-rules-title">📑 已保存的站点规则清单 (<span id="count-synced-rules">0</span>)</span>
-                <span class="synced-rules-arrow" id="arrow-rules-list">▼</span>
-              </div>
-              <div class="synced-rules-list" id="synced-rules-list" style="display: none;">
-                <!-- 动态渲染站点规则项 -->
               </div>
             </div>
           </div>
@@ -658,73 +771,345 @@ function setupWebDAVSync() {
     }
   }
 
+  const inputVaultSearch = document.getElementById('input-vault-search') as HTMLInputElement | null;
+  const btnClearVaultSearch = document.getElementById('btn-clear-vault-search') as HTMLButtonElement | null;
+  const btnRefreshVault = document.getElementById('btn-refresh-vault') as HTMLButtonElement | null;
+
+  let vaultSearchKeyword = '';
+
+  // 绑定速查清单搜索与刷新
+  inputVaultSearch?.addEventListener('input', () => {
+    vaultSearchKeyword = (inputVaultSearch.value || '').trim().toLowerCase();
+    if (btnClearVaultSearch) {
+      btnClearVaultSearch.style.display = vaultSearchKeyword ? 'block' : 'none';
+    }
+    renderRulesList();
+  });
+
+  btnClearVaultSearch?.addEventListener('click', () => {
+    if (inputVaultSearch) inputVaultSearch.value = '';
+    vaultSearchKeyword = '';
+    if (btnClearVaultSearch) btnClearVaultSearch.style.display = 'none';
+    renderRulesList();
+    inputVaultSearch?.focus();
+  });
+
+  btnRefreshVault?.addEventListener('click', () => {
+    renderRulesList();
+    showToast('已刷新站点清单');
+  });
+
   // 渲染规则清单
   function renderRulesList() {
     if (!syncedRulesList) return;
     const manifest = getLocalManifest();
-    const domainKeys = Object.keys(manifest.domains || {});
+    const allDomains = manifest.domains || {};
+    let domainKeys = Object.keys(allDomains);
 
-    if (countRulesEl) countRulesEl.textContent = String(domainKeys.length);
+    if (countRulesEl) {
+      countRulesEl.textContent = String(domainKeys.length);
+    }
+
+    // 搜索过滤逻辑
+    if (vaultSearchKeyword) {
+      domainKeys = domainKeys.filter((k) => {
+        const item = allDomains[k];
+        if (!item) return false;
+        const unicodeDom = toUnicodeDomain(item.canonicalDomain).toLowerCase();
+        const rawDom = (item.canonicalDomain || '').toLowerCase();
+        const disp = (item.displayName || '').toLowerCase();
+        const preset = (item.rulePreset || '').toLowerCase();
+        const accs = Object.keys(item.accounts || {}).join(' ').toLowerCase();
+
+        return (
+          unicodeDom.includes(vaultSearchKeyword) ||
+          rawDom.includes(vaultSearchKeyword) ||
+          disp.includes(vaultSearchKeyword) ||
+          preset.includes(vaultSearchKeyword) ||
+          accs.includes(vaultSearchKeyword)
+        );
+      });
+    }
 
     if (domainKeys.length === 0) {
-      syncedRulesList.innerHTML = `
-        <div style="font-size: 11px; color: #64748b; text-align: center; padding: 10px 0;">
-          暂无已记录站点规则。在上方计算派生密码后，点击「📌 记住规则」即可加入多端同步清单。
-        </div>
-      `;
+      if (vaultSearchKeyword) {
+        syncedRulesList.innerHTML = `
+          <div class="vault-empty-state">
+            <span class="empty-icon">🔍</span>
+            <div class="empty-title">未找到匹配站点</div>
+            <div class="empty-text">没有与 "${vaultSearchKeyword}" 匹配的域名或账号</div>
+            <button type="button" class="btn-reset-search" id="btn-reset-search-empty">清空搜索词</button>
+          </div>
+        `;
+        document.getElementById('btn-reset-search-empty')?.addEventListener('click', () => {
+          if (inputVaultSearch) inputVaultSearch.value = '';
+          vaultSearchKeyword = '';
+          if (btnClearVaultSearch) btnClearVaultSearch.style.display = 'none';
+          renderRulesList();
+        });
+      } else {
+        syncedRulesList.innerHTML = `
+          <div class="vault-empty-state">
+            <span class="empty-icon">📂</span>
+            <div class="empty-title">暂无已保存的站点与账号</div>
+            <div class="empty-text">
+              1. 在上方输入目标站点计算后点击「📌 记住规则」加入清单；<br/>
+              2. 或在下方配置 WebDAV 一键双向同步即可同步全量密码库！
+            </div>
+          </div>
+        `;
+      }
       return;
     }
 
+    // 排序并渲染
     syncedRulesList.innerHTML = domainKeys
-      .sort()
+      .sort((a, b) => {
+        const itemA = allDomains[a];
+        const itemB = allDomains[b];
+        return (itemB.updatedAt || 0) - (itemA.updatedAt || 0);
+      })
       .map((k) => {
-        const item = manifest.domains[k];
-        const hasCustom = Boolean(item.displayName && item.displayName !== item.canonicalDomain);
-        const title = hasCustom ? item.displayName : item.canonicalDomain;
-        const sub = hasCustom ? item.canonicalDomain : '';
-        return `
-          <div class="rule-item-row" data-domain="${item.canonicalDomain}">
-            <div style="display: flex; flex-direction: column; gap: 2px;">
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span class="rule-item-domain">${hasCustom ? '🏷️ ' : ''}${title}</span>
-                <span class="rule-item-preset">${item.rulePreset}</span>
-                <button type="button" class="btn-edit-rule-alias" data-domain="${item.canonicalDomain}" data-name="${item.displayName || ''}" title="修改站点别名" style="border: none; background: transparent; cursor: pointer; font-size: 11px; opacity: 0.6; padding: 0 2px;">✏️</button>
+        const item = allDomains[k];
+        const unicodeDomain = toUnicodeDomain(item.canonicalDomain);
+        const hasCustomAlias = Boolean(item.displayName && item.displayName !== item.canonicalDomain && item.displayName !== unicodeDomain);
+        const displayTitle = hasCustomAlias ? item.displayName : unicodeDomain;
+        const subDomainText = hasCustomAlias ? unicodeDomain : (unicodeDomain !== item.canonicalDomain ? item.canonicalDomain : '');
+        const presetObj = RULE_PRESETS[item.rulePreset as RulePreset] || RULE_PRESETS['standard-16'];
+        const presetName = presetObj?.name || item.rulePreset;
+
+        const accounts = Object.values(item.accounts || {}).filter((a) => !a.isDeleted);
+        const safeDomainId = item.canonicalDomain.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+        let accountsHtml = '';
+        if (accounts.length > 0) {
+          accountsHtml = accounts.map((acc, accIdx) => {
+            const accSafeId = `${safeDomainId}_acc_${accIdx}`;
+            return `
+              <div class="vault-account-row">
+                <div class="acc-meta-left">
+                  <span class="acc-user-badge">👤 ${acc.username}</span>
+                  <span class="acc-ver-badge">v${acc.version || 1}</span>
+                </div>
+                <div class="acc-actions-right">
+                  <button type="button" class="btn-acc-action btn-load-to-panel" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-preset="${item.rulePreset}" title="载入到上方主面板计算">
+                    ⚡ 载入
+                  </button>
+                  <button type="button" class="btn-acc-action btn-copy-site-pwd" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-title="${displayTitle}" title="直接计算并复制密码">
+                    📋 复制密码
+                  </button>
+                  <button type="button" class="btn-acc-action btn-peek-site-pwd" data-target="peek-${accSafeId}" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" title="查看计算密码">
+                    👁️
+                  </button>
+                </div>
               </div>
-              ${sub ? `<span style="font-size: 9.5px; color: #64748b; margin-left: 16px;">🌐 ${sub}</span>` : ''}
+              <div class="vault-peek-pwd-bar" id="peek-${accSafeId}" style="display: none;">
+                <span class="peek-pwd-val">••••••••••••••••</span>
+                <span class="peek-pwd-timer">5秒后自动隐蔽</span>
+              </div>
+            `;
+          }).join('');
+        } else {
+          const defaultSafeId = `${safeDomainId}_default`;
+          accountsHtml = `
+            <div class="vault-account-row">
+              <div class="acc-meta-left">
+                <span class="acc-user-badge default-key">默认凭据 (未指定账号)</span>
+              </div>
+              <div class="acc-actions-right">
+                <button type="button" class="btn-acc-action btn-load-to-panel" data-domain="${item.canonicalDomain}" data-user="" data-preset="${item.rulePreset}" title="载入到上方主面板计算">
+                  ⚡ 载入
+                </button>
+                <button type="button" class="btn-acc-action btn-copy-site-pwd" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-title="${displayTitle}" title="直接计算并复制密码">
+                  📋 复制密码
+                </button>
+                <button type="button" class="btn-acc-action btn-peek-site-pwd" data-target="peek-${defaultSafeId}" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" title="查看计算密码">
+                  👁️
+                </button>
+              </div>
             </div>
-            <button type="button" class="btn-del-rule" data-del="${item.canonicalDomain}" title="从同步清单移除">✕</button>
+            <div class="vault-peek-pwd-bar" id="peek-${defaultSafeId}" style="display: none;">
+              <span class="peek-pwd-val">••••••••••••••••</span>
+              <span class="peek-pwd-timer">5秒后自动隐蔽</span>
+            </div>
+          `;
+        }
+
+        return `
+          <div class="vault-site-card" data-domain="${item.canonicalDomain}">
+            <div class="vault-site-header">
+              <div class="vault-site-info">
+                <div class="vault-site-title-row">
+                  <span class="vault-site-name">${hasCustomAlias ? '🏷️ ' : '🌐 '}${displayTitle}</span>
+                  <button type="button" class="btn-edit-alias-inline" data-domain="${item.canonicalDomain}" data-name="${item.displayName || ''}" title="修改站点别名/备注">✏️</button>
+                </div>
+                ${subDomainText ? `<span class="vault-site-sub">🌐 ${subDomainText}</span>` : ''}
+              </div>
+              <div class="vault-site-meta">
+                <span class="vault-preset-pill">${presetName}</span>
+                <button type="button" class="btn-del-site-rule" data-del="${item.canonicalDomain}" data-name="${displayTitle}" title="从清单移除">✕</button>
+              </div>
+            </div>
+            <div class="vault-accounts-box">
+              ${accountsHtml}
+            </div>
           </div>
         `;
       })
       .join('');
 
-    // 绑定别名修改按钮
-    syncedRulesList.querySelectorAll('.btn-edit-rule-alias').forEach((btn) => {
+    // 事件绑定: 载入主面板
+    syncedRulesList.querySelectorAll('.btn-load-to-panel').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const dom = btn.getAttribute('data-domain') || '';
+        const preset = (btn.getAttribute('data-preset') as RulePreset) || 'standard-16';
+        if (inputDomain) {
+          inputDomain.value = dom;
+        }
+        if (RULE_PRESETS[preset]) {
+          currentPreset = preset;
+          presetSelector?.querySelectorAll('.preset-btn').forEach((b) => {
+            if (b.getAttribute('data-preset') === preset) {
+              b.classList.add('active');
+            } else {
+              b.classList.remove('active');
+            }
+          });
+          if (textRuleDesc) {
+            textRuleDesc.textContent = RULE_PRESETS[preset].description + ' (已匹配站点规则)';
+          }
+        }
+        compute();
+        document.getElementById('card-generator')?.scrollIntoView({ behavior: 'smooth' });
+        if (!inputMantra?.value?.trim()) {
+          inputMantra?.focus();
+          showToast(`已载入站点 [${dom}]，请输入主口令查看计算密码`);
+        } else {
+          showToast(`已载入站点 [${dom}]，密码已现场计算`);
+        }
+      });
+    });
+
+    // 事件绑定: 现场计算并复制密码
+    syncedRulesList.querySelectorAll('.btn-copy-site-pwd').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const mantra = inputMantra?.value?.trim() || '';
+        const dom = btn.getAttribute('data-domain') || '';
+        const user = btn.getAttribute('data-user') || '';
+        const ver = parseInt(btn.getAttribute('data-ver') || '1', 10);
+        const preset = (btn.getAttribute('data-preset') as RulePreset) || 'standard-16';
+        const title = btn.getAttribute('data-title') || dom;
+
+        if (!mantra) {
+          document.getElementById('card-generator')?.scrollIntoView({ behavior: 'smooth' });
+          inputMantra?.focus();
+          showToast('💡 请先在上方输入您的主口令，即可一键复制密码');
+          return;
+        }
+
+        try {
+          const originalText = btn.textContent;
+          btn.textContent = '⏳ 计算中...';
+          const pwd = await deriveSitePassword(mantra, dom, user, ver, preset);
+          await navigator.clipboard.writeText(pwd);
+          btn.textContent = '✅ 已复制！';
+          btn.classList.add('copied');
+          showToast(`🎉 已成功计算并复制 [${title}${user ? ` - ${user}` : ''}] 的密码！`);
+          setTimeout(() => {
+            btn.textContent = originalText;
+            btn.classList.remove('copied');
+          }, 2000);
+        } catch (err: any) {
+          showToast(`❌ 密码计算失败: ${err?.message || '未知错误'}`);
+        }
+      });
+    });
+
+    // 事件绑定: 睁眼查看计算密码 (5秒后自动隐蔽)
+    syncedRulesList.querySelectorAll('.btn-peek-site-pwd').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const mantra = inputMantra?.value?.trim() || '';
+        const dom = btn.getAttribute('data-domain') || '';
+        const user = btn.getAttribute('data-user') || '';
+        const ver = parseInt(btn.getAttribute('data-ver') || '1', 10);
+        const preset = (btn.getAttribute('data-preset') as RulePreset) || 'standard-16';
+        const targetId = btn.getAttribute('data-target') || '';
+        const targetEl = document.getElementById(targetId);
+
+        if (!mantra) {
+          document.getElementById('card-generator')?.scrollIntoView({ behavior: 'smooth' });
+          inputMantra?.focus();
+          showToast('💡 请先在上方输入您的主口令，即可查看密码');
+          return;
+        }
+
+        if (!targetEl) return;
+
+        if (targetEl.style.display !== 'none') {
+          targetEl.style.display = 'none';
+          btn.textContent = '👁️';
+          return;
+        }
+
+        try {
+          const pwd = await deriveSitePassword(mantra, dom, user, ver, preset);
+          const valEl = targetEl.querySelector('.peek-pwd-val');
+          if (valEl) valEl.textContent = pwd;
+          targetEl.style.display = 'flex';
+          btn.textContent = '🙈';
+
+          // 5秒倒计时自动隐藏
+          let leftSec = 5;
+          const timerEl = targetEl.querySelector('.peek-pwd-timer');
+          const interval = setInterval(() => {
+            leftSec--;
+            if (timerEl) timerEl.textContent = `${leftSec}秒后自动隐蔽`;
+            if (leftSec <= 0) {
+              clearInterval(interval);
+              targetEl.style.display = 'none';
+              btn.textContent = '👁️';
+              if (valEl) valEl.textContent = '••••••••••••••••';
+            }
+          }, 1000);
+        } catch (err: any) {
+          showToast(`❌ 密码派生异常: ${err?.message || '未知错误'}`);
+        }
+      });
+    });
+
+    // 事件绑定: 修改别名
+    syncedRulesList.querySelectorAll('.btn-edit-alias-inline').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const d = btn.getAttribute('data-domain') || '';
         const curName = btn.getAttribute('data-name') || '';
-        const newAlias = window.prompt(`为站点 [${d}] 设置别名:`, curName);
+        const newAlias = window.prompt(`为站点 [${d}] 设置别名/备注名称:`, curName);
         if (newAlias !== null) {
           const item = manifest.domains[d];
           if (item) {
             recordDomainRule(d, item.rulePreset, newAlias.trim());
             renderRulesList();
             refreshStatusView();
+            showToast(`✅ 已更新站点 [${d}] 的别名`);
           }
         }
       });
     });
 
-    // 绑定删除按钮
-    syncedRulesList.querySelectorAll('.btn-del-rule').forEach((btn) => {
+    // 事件绑定: 删除站点规则
+    syncedRulesList.querySelectorAll('.btn-del-site-rule').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const delDomain = btn.getAttribute('data-del');
-        if (delDomain) {
+        const siteName = btn.getAttribute('data-name') || delDomain;
+        if (delDomain && window.confirm(`确定要从清单中移除站点 [${siteName}] 吗？`)) {
           removeDomainRule(delDomain);
           renderRulesList();
           refreshStatusView();
+          showToast(`已移除站点 [${siteName}]`);
         }
       });
     });

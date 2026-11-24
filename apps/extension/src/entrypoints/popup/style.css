@@ -500,14 +500,26 @@ body.is-unlocked .enclave-badge {
   border-radius: var(--radius-input);
   color: var(--color-text-main);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 12.5px;
+  font-weight: 600;
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cyber-input::placeholder {
+  font-weight: 500;
+  color: var(--color-text-dim);
 }
 
 .cyber-input:focus {
   border-color: var(--color-cyan);
   box-shadow: 0 0 10px var(--color-cyan-glow);
+}
+
+#new-acc-user {
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.02em;
 }
 
 .btn-eye {
@@ -941,8 +953,10 @@ body.is-unlocked .enclave-badge {
 
 .form-label {
   font-family: var(--font-mono);
-  font-size: 9.5px;
-  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-main);
+  letter-spacing: -0.01em;
 }
 
 .cyber-select {
@@ -952,7 +966,8 @@ body.is-unlocked .enclave-badge {
   border-radius: var(--radius-input);
   color: var(--color-text-main);
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
+  font-weight: 600;
   outline: none;
 }
 
