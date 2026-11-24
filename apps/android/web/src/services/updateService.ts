@@ -178,19 +178,26 @@ export async function fetchLatestRelease(isDebug: boolean = false): Promise<Vers
   const acceleratedUrl = isDebug ? acceleratedDebugUrl : acceleratedReleaseUrl;
   const assetName = isDebug ? `mantra-key-${verTag}-debug.apk` : `mantra-key-${verTag}-release.apk`;
 
-  let releaseSha256 = (releaseData.releaseSha256 || '').trim().toLowerCase();
-  let debugSha256 = (releaseData.debugSha256 || '').trim().toLowerCase();
+  let releaseSha256 = '';
+  let debugSha256 = '';
 
-  if (!releaseSha256 && !debugSha256) {
-    try {
-      const shaMap = await fetchSha256Sums(verTag);
-      if (shaMap) {
-        releaseSha256 = shaMap.release || shaMap[`mantra-key-${verTag}-release.apk`] || '';
-        debugSha256 = shaMap.debug || shaMap[`mantra-key-${verTag}-debug.apk`] || '';
-      }
-    } catch {
-      // 容错降级
+  // 权威来源优先：优先直接从 GitHub Release 资产中竞速拉取由 CI 生成的 SHA256SUMS.txt
+  try {
+    const shaMap = await fetchSha256Sums(verTag);
+    if (shaMap) {
+      releaseSha256 = shaMap.release || shaMap[`mantra-key-${verTag}-release.apk`] || '';
+      debugSha256 = shaMap.debug || shaMap[`mantra-key-${verTag}-debug.apk`] || '';
     }
+  } catch {
+    // 容错降级
+  }
+
+  // 兜底来源：从 version.json 提取
+  if (!releaseSha256) {
+    releaseSha256 = (releaseData.releaseSha256 || '').trim().toLowerCase();
+  }
+  if (!debugSha256) {
+    debugSha256 = (releaseData.debugSha256 || '').trim().toLowerCase();
   }
 
   const activeSha256 = isDebug ? debugSha256 : releaseSha256;

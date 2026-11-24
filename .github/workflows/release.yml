@@ -292,3 +292,29 @@ jobs:
           draft: false
           prerelease: ${{ contains(env.TAG, '-') }}
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync CI Hashes to public/version.json
+        run: |
+          python -c "
+          import json
+          with open('public/version.json', 'r', encoding='utf-8') as f:
+              v = json.load(f)
+          with open('release-assets/SHA256SUMS.txt', 'r', encoding='utf-8') as f:
+              for line in f:
+                  parts = line.strip().split()
+                  if len(parts) >= 2:
+                      h, name = parts[0], parts[1]
+                      if 'artifacts' in v and name in v['artifacts']:
+                          v['artifacts'][name]['sha256'] = h
+                      if 'release.apk' in name:
+                          v['releaseSha256'] = h
+                      elif 'debug.apk' in name:
+                          v['debugSha256'] = h
+          with open('public/version.json', 'w', encoding='utf-8') as f:
+              json.dump(v, f, indent=4, ensure_ascii=False)
+          "
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/version.json
+          git commit -m "chore(release): sync release assets sha256 to version.json [skip ci]" || true
+          git push origin main || true
