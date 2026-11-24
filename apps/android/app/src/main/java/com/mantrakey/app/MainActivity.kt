@@ -459,48 +459,108 @@ class MainActivity : AppCompatActivity() {
                         wakeLock.acquire(15 * 60 * 1000L)
                     }
 
-                    val existingLength = if (tempFile.exists() && tempFile.isFile) tempFile.length() else 0L
-
-                    var currentUrl = URL(downloadUrl)
-                    connection = (currentUrl.openConnection() as HttpURLConnection).apply {
-                        instanceFollowRedirects = true
-                        connectTimeout = 15000
-                        readTimeout = 30000
-                        setRequestProperty("User-Agent", "Mozilla/5.0 MantraKey-Android-Update")
-                        if (existingLength > 0) {
-                            setRequestProperty("Range", "bytes=$existingLength-")
-                        }
+                    val rawUrl = if (downloadUrl.contains("https://github.com/")) {
+                        "https://github.com/" + downloadUrl.substringAfter("https://github.com/")
+                    } else {
+                        downloadUrl
                     }
-                    connection.connect()
 
-                    var responseCode = connection.responseCode
-                    // 处理 HTTP 301/302/307/308 重定向
-                    if (responseCode == HttpURLConnection.HTTP_MOVED_PERM ||
-                        responseCode == HttpURLConnection.HTTP_MOVED_TEMP ||
-                        responseCode == 307 ||
-                        responseCode == 308
-                    ) {
-                        val newUrl = connection.getHeaderField("Location")
-                        if (!newUrl.isNullOrBlank()) {
-                            connection.disconnect()
-                            currentUrl = URL(newUrl)
-                            connection = (currentUrl.openConnection() as HttpURLConnection).apply {
+                    // 构建高可用多节点候选列表 (优先健康高速镜像，自动故障转移)
+                    val candidateUrls = mutableListOf<String>()
+                    if (rawUrl.startsWith("https://github.com/")) {
+                        candidateUrls.add("https://ghproxy.net/$rawUrl")
+                        candidateUrls.add("https://gh-proxy.com/$rawUrl")
+                        candidateUrls.add("https://mirror.ghproxy.com/$rawUrl")
+                        candidateUrls.add(rawUrl) // GitHub 官方直连
+                    }
+                    if (!downloadUrl.isNullOrBlank() && !candidateUrls.contains(downloadUrl)) {
+                        candidateUrls.add(downloadUrl)
+                    }
+                    val uniqueCandidates = candidateUrls.distinct()
+
+                    var connected = false
+                    var lastErrorMsg = ""
+                    var isRange = false
+                    var existingLength = if (tempFile.exists() && tempFile.isFile) tempFile.length() else 0L
+
+                    for ((idx, candidate) in uniqueCandidates.withIndex()) {
+                        if (!isDownloading.get()) return@Thread
+                        if (idx > 0) {
+                            val msg = "正在自动切换备用加速节点 (${idx + 1}/${uniqueCandidates.size})..."
+                            lastMessage = msg
+                            notifyJsUpdateStatus("downloading", lastPercent, lastReceived, lastTotal, msg)
+                        }
+
+                        try {
+                            var currentUrl = URL(candidate)
+                            var conn = (currentUrl.openConnection() as HttpURLConnection).apply {
                                 instanceFollowRedirects = true
-                                connectTimeout = 15000
-                                readTimeout = 30000
+                                connectTimeout = 7000
+                                readTimeout = 20000
                                 setRequestProperty("User-Agent", "Mozilla/5.0 MantraKey-Android-Update")
                                 if (existingLength > 0) {
                                     setRequestProperty("Range", "bytes=$existingLength-")
                                 }
                             }
-                            connection.connect()
-                            responseCode = connection.responseCode
+                            conn.connect()
+
+                            var responseCode = conn.responseCode
+                            var redirectCount = 0
+                            while ((responseCode == HttpURLConnection.HTTP_MOVED_PERM ||
+                                    responseCode == HttpURLConnection.HTTP_MOVED_TEMP ||
+                                    responseCode == 307 ||
+                                    responseCode == 308) && redirectCount < 5) {
+                                val newUrl = conn.getHeaderField("Location")
+                                conn.disconnect()
+                                if (newUrl.isNullOrBlank()) break
+                                currentUrl = URL(newUrl)
+                                conn = (currentUrl.openConnection() as HttpURLConnection).apply {
+                                    instanceFollowRedirects = true
+                                    connectTimeout = 7000
+                                    readTimeout = 20000
+                                    setRequestProperty("User-Agent", "Mozilla/5.0 MantraKey-Android-Update")
+                                    if (existingLength > 0) {
+                                        setRequestProperty("Range", "bytes=$existingLength-")
+                                    }
+                                }
+                                conn.connect()
+                                responseCode = conn.responseCode
+                                redirectCount++
+                            }
+
+                            if (responseCode == 416) {
+                                conn.disconnect()
+                                tempFile.delete()
+                                existingLength = 0L
+                                currentUrl = URL(candidate)
+                                conn = (currentUrl.openConnection() as HttpURLConnection).apply {
+                                    instanceFollowRedirects = true
+                                    connectTimeout = 7000
+                                    readTimeout = 20000
+                                    setRequestProperty("User-Agent", "Mozilla/5.0 MantraKey-Android-Update")
+                                }
+                                conn.connect()
+                                responseCode = conn.responseCode
+                            }
+
+                            if (responseCode == HttpURLConnection.HTTP_OK || responseCode == 206) {
+                                connection = conn
+                                isRange = (responseCode == 206)
+                                connected = true
+                                Log.i(TAG, "已成功连通更新节点: $candidate (HTTP $responseCode)")
+                                break
+                            } else {
+                                conn.disconnect()
+                                lastErrorMsg = "HTTP $responseCode"
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "更新节点 $candidate 连接失败: ${e.message}")
+                            lastErrorMsg = e.message ?: "连接超时"
                         }
                     }
 
-                    val isRange = (responseCode == 206)
-                    if (responseCode != HttpURLConnection.HTTP_OK && !isRange) {
-                        throw Exception("下载服务端返回异常 (HTTP $responseCode)")
+                    if (!connected || connection == null) {
+                        throw Exception("所有加速镜像与直连节点均连接失败 ($lastErrorMsg)")
                     }
 
                     val serverContentLength = connection.contentLength.toLong()

@@ -161,30 +161,39 @@ def handle_auto_update_extension(payload):
     extract_dir = os.path.join(temp_dir, "extracted")
 
     try:
-        # 1. 尝试从加速源下载，若失败平滑降级至官方源
+        # 1. 构建多加速镜像与官方直连候选队列，自动故障转移
+        candidates = []
+        if download_url and download_url not in candidates:
+            candidates.append(download_url)
+        if direct_url and direct_url not in candidates:
+            candidates.append(direct_url)
+
+        raw_github_url = direct_url or (download_url if download_url and "github.com/" in download_url else "")
+        if raw_github_url and "github.com/" in raw_github_url:
+            raw_tail = "https://github.com/" + raw_github_url.split("github.com/")[1]
+            for prefix in ["https://ghproxy.net/", "https://gh-proxy.com/", "https://mirror.ghproxy.com/"]:
+                mirror_url = f"{prefix}{raw_tail}"
+                if mirror_url not in candidates:
+                    candidates.append(mirror_url)
+            if raw_tail not in candidates:
+                candidates.append(raw_tail)
+
         downloaded = False
         last_err = None
 
-        if download_url:
+        for idx, candidate in enumerate(candidates):
             try:
-                log(f"正在从首选地址下载: {download_url}")
-                download_file(download_url, zip_path, expected_sha256)
+                log(f"正在从节点 ({idx + 1}/{len(candidates)}) 下载: {candidate}")
+                download_file(candidate, zip_path, expected_sha256)
                 downloaded = True
+                log(f"节点 ({idx + 1}/{len(candidates)}) 下载成功！")
+                break
             except Exception as e:
-                log(f"首选地址下载失败，准备尝试备用源: {e}")
-                last_err = e
-
-        if not downloaded and direct_url:
-            try:
-                log(f"正在从备用地址下载: {direct_url}")
-                download_file(direct_url, zip_path, expected_sha256)
-                downloaded = True
-            except Exception as e:
-                log(f"备用地址下载失败: {e}")
+                log(f"节点 {candidate} 下载失败: {e}")
                 last_err = e
 
         if not downloaded:
-            raise RuntimeError(f"下载更新包失败: {last_err}")
+            raise RuntimeError(f"所有下载镜像节点均连接失败: {last_err}")
 
         # 2. 解压 ZIP 包
         import zipfile

@@ -31,7 +31,7 @@ export interface VersionMetadata {
 
 // 仓库配置，支持环境变量动态覆盖
 export const GITHUB_REPO = (import.meta.env.VITE_GITHUB_REPO || defaultConfig.githubRepo).trim();
-export const ACCELERATOR_PREFIX = (defaultConfig.acceleratorPrefix || 'https://ghfast.top/').trim();
+export const ACCELERATOR_PREFIX = (defaultConfig.acceleratorPrefix || 'https://ghproxy.net/').trim();
 export const CURRENT_APP_VERSION = (import.meta.env.VITE_APP_VERSION || defaultConfig.version || '0.1.0').trim();
 
 /**
@@ -67,12 +67,14 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
- * 尝试从远端下载并解析 SHA256SUMS.txt
+ * 尝试从远端下载并解析 SHA256SUMS.txt (多镜像竞速)
  */
 export async function fetchSha256Sums(verTag: string): Promise<Record<string, string> | null> {
   if (!verTag) return null;
   const urls = [
-    `${ACCELERATOR_PREFIX}https://github.com/${GITHUB_REPO}/releases/download/${verTag}/SHA256SUMS.txt`,
+    `https://ghproxy.net/https://github.com/${GITHUB_REPO}/releases/download/${verTag}/SHA256SUMS.txt`,
+    `https://gh-proxy.com/https://github.com/${GITHUB_REPO}/releases/download/${verTag}/SHA256SUMS.txt`,
+    `https://mirror.ghproxy.com/https://github.com/${GITHUB_REPO}/releases/download/${verTag}/SHA256SUMS.txt`,
     `https://github.com/${GITHUB_REPO}/releases/download/${verTag}/SHA256SUMS.txt`
   ];
 
@@ -124,7 +126,8 @@ export async function fetchLatestRelease(isDebug: boolean = false): Promise<Vers
     // 0. 穿透联调高速通道 (若已配置 cpolar/局域网，优先获取本机热打包版本)
     tunnelVersionUrl,
     // 1. 国内代理镜像 (实时直连 GitHub Raw，无 CDN 边缘缓存延迟)
-    `https://ghfast.top/https://raw.githubusercontent.com/${GITHUB_REPO}/main/public/version.json?t=${timestamp}`,
+    `https://ghproxy.net/https://raw.githubusercontent.com/${GITHUB_REPO}/main/public/version.json?t=${timestamp}`,
+    `https://gh-proxy.com/https://raw.githubusercontent.com/${GITHUB_REPO}/main/public/version.json?t=${timestamp}`,
     // 2. GitHub Raw 直连
     `https://raw.githubusercontent.com/${GITHUB_REPO}/main/public/version.json?t=${timestamp}`,
     // 3. jsDelivr 全球加速 CDN
@@ -148,7 +151,7 @@ export async function fetchLatestRelease(isDebug: boolean = false): Promise<Vers
           if (!releaseData || compareVersions(releaseData.version || releaseData.versionTag, json.version || json.versionTag) > 0) {
             releaseData = json;
           }
-          if (url === tunnelVersionUrl || url.includes('ghfast.top') || url.includes('raw.githubusercontent.com')) {
+          if (url === tunnelVersionUrl || url.includes('ghproxy.net') || url.includes('gh-proxy.com') || url.includes('raw.githubusercontent.com')) {
             break;
           }
         }

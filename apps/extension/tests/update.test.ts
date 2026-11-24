@@ -45,7 +45,7 @@ test('performExtensionAutoUpdate 成功时应调用原生更新并触发热重�
     versionTag: 'v0.1.1',
     changelog: '更新日志',
     downloadUrl: 'https://example.com/test.zip',
-    acceleratedDownloadUrl: 'https://ghfast.top/https://example.com/test.zip'
+    acceleratedDownloadUrl: 'https://ghproxy.net/https://example.com/test.zip'
   };
 
   const logs: string[] = [];
@@ -64,7 +64,7 @@ test('performExtensionAutoUpdate 原生不可用时应平滑降级至浏览器�
     versionTag: 'v0.1.1',
     changelog: '更新日志',
     downloadUrl: 'https://example.com/fail.zip',
-    acceleratedDownloadUrl: 'https://ghfast.top/https://example.com/fail.zip'
+    acceleratedDownloadUrl: 'https://ghproxy.net/https://example.com/fail.zip'
   };
 
   const logs: string[] = [];

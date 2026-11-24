@@ -73,7 +73,7 @@ export async function performExtensionAutoUpdate(
 }
 
 export const GITHUB_REPO = 'lylyuanliang/mantra-key';
-export const ACCELERATOR_PREFIX = 'https://ghfast.top/';
+export const ACCELERATOR_PREFIX = 'https://ghproxy.net/';
 
 /**
  * 语义化版本号对比
@@ -104,7 +104,8 @@ export async function checkExtensionUpdate(): Promise<ExtensionUpdateInfo | null
   const timestamp = Date.now();
 
   const candidateUrls = [
-    `https://ghfast.top/https://raw.githubusercontent.com/${GITHUB_REPO}/main/public/version.json?t=${timestamp}`,
+    `https://ghproxy.net/https://raw.githubusercontent.com/${GITHUB_REPO}/main/public/version.json?t=${timestamp}`,
+    `https://gh-proxy.com/https://raw.githubusercontent.com/${GITHUB_REPO}/main/public/version.json?t=${timestamp}`,
     `https://raw.githubusercontent.com/${GITHUB_REPO}/main/public/version.json?t=${timestamp}`,
     `https://cdn.jsdelivr.net/gh/${GITHUB_REPO}@main/public/version.json?t=${timestamp}`
   ];

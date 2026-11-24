@@ -96,12 +96,13 @@ export default defineBackground(() => {
         return;
       }
 
+      const timeoutMs = action === 'AUTO_UPDATE_EXTENSION' ? 60000 : 2500;
       const timer = setTimeout(() => {
         if (pendingRequests.has(envelope.id)) {
           pendingRequests.delete(envelope.id);
           resolve(null);
         }
-      }, 1500);
+      }, timeoutMs);
 
       pendingRequests.set(envelope.id, (res) => {
         clearTimeout(timer);
