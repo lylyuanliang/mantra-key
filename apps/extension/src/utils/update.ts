@@ -45,6 +45,7 @@ export async function performExtensionAutoUpdate(
         extensionId: chrome.runtime?.id
       }
     }, (response) => {
+      const _err = chrome.runtime.lastError;
       resolve(response);
     });
   });

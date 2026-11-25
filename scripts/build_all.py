@@ -310,7 +310,7 @@ def generate_checksums_and_metadata():
     v_data = {
         "version": VERSION,
         "versionTag": f"v{VERSION}",
-        "title": f"密诀 MantraKey v{VERSION} 全端正式发布版",
+        "title": f"MantraKey v{VERSION}",
         "changelog": existing_changelog,
         "publishedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "htmlUrl": f"https://github.com/lylyuanliang/mantra-key/releases/tag/v{VERSION}",

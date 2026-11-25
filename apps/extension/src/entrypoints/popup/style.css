@@ -1713,7 +1713,8 @@ body.is-unlocked .enclave-badge {
   gap: 2px;
 }
 
-.btn-edit-alias-icon {
+.btn-edit-alias-icon,
+.btn-edit-current-alias {
   border: none;
   background: transparent;
   color: var(--color-text-muted);
@@ -1726,11 +1727,12 @@ body.is-unlocked .enclave-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.55;
+  opacity: 0.6;
   flex-shrink: 0;
 }
 
-.btn-edit-alias-icon:hover {
+.btn-edit-alias-icon:hover,
+.btn-edit-current-alias:hover {
   opacity: 1;
   color: var(--color-primary);
   background: rgba(13, 148, 136, 0.12);

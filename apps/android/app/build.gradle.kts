@@ -11,8 +11,8 @@ android {
         applicationId = "com.mantrakey.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "0.1.1.202611250920"
+        versionCode = 7
+        versionName = "0.1.1.202611251050"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

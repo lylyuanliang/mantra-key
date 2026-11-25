@@ -110,7 +110,7 @@ def extract_changelog(tag, version_json_path="public/version.json"):
 def generate_notes(artifacts_dir, output_path, tag="v0.1.0", version_json_path="public/version.json"):
     changelog, version_info = extract_changelog(tag, version_json_path)
 
-    title = version_info.get("title") or f"密诀 MantraKey {tag} 全端正式发布版"
+    title = f"MantraKey {tag}"
 
     # 扫描产物并提取大小与 SHA256
     files_in_dir = os.listdir(artifacts_dir) if os.path.exists(artifacts_dir) else []

@@ -283,7 +283,7 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: 密诀 MantraKey ${{ env.TAG }} 全端正式发布版
+          name: MantraKey ${{ env.TAG }}
           tag_name: ${{ env.TAG }}
           body_path: release_notes.md
           files: |

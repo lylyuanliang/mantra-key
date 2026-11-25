@@ -681,7 +681,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (currentDomainTitleRow) {
       currentDomainTitleRow.innerHTML = `
         <span class="domain-name" id="current-domain-text" title="${currentDomain}">${unicode}</span>
-        <button type="button" id="btn-edit-current-alias" title="设置/修改站点别名" style="border: none; background: transparent; cursor: pointer; font-size: 11px; padding: 0 2px; opacity: 0.6; transition: opacity 0.15s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'">✏️</button>
+        <button type="button" id="btn-edit-current-alias" class="btn-edit-current-alias" title="设置/修改站点别名">✏️</button>
       `;
       currentDomainTitleRow.querySelector('#btn-edit-current-alias')?.addEventListener('click', (e) => {
         e.stopPropagation();
