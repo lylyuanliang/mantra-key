@@ -1,7 +1,7 @@
 import { defineConfig } from 'wxt';
 
 // 读取当前版本号，保证完全符合 Google Chrome Web Store 规范 (严格 1-4 个整数，各段 <= 65535)
-const rawVersion = process.env.APP_VERSION || '0.1.1.202611241925';
+const rawVersion = process.env.APP_VERSION || '0.1.1.202611250920';
 // Chrome 要求 manifest.version 每段必须 <= 65535，因此前三位作为 version，完整带时间戳作为 version_name
 const versionParts = rawVersion.split('.');
 const chromeVersion = versionParts.slice(0, 3).join('.');

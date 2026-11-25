@@ -15,6 +15,8 @@ import android.view.autofill.AutofillManager
 import android.view.inputmethod.InputMethodManager
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
+import android.webkit.JsPromptResult
+import android.webkit.JsResult
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -22,9 +24,11 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.webkit.WebViewAssetLoader
@@ -886,6 +890,59 @@ class MainActivity : AppCompatActivity() {
                     this@MainActivity.filePathCallback = null
                     return false
                 }
+            }
+
+            override fun onJsAlert(view: WebView?, url: String?, message: String?, result: JsResult?): Boolean {
+                if (isFinishing || isDestroyed) {
+                    result?.cancel()
+                    return false
+                }
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("密诀提示")
+                    .setMessage(message ?: "")
+                    .setPositiveButton("确定") { _, _ -> result?.confirm() }
+                    .setOnCancelListener { result?.cancel() }
+                    .show()
+                return true
+            }
+
+            override fun onJsConfirm(view: WebView?, url: String?, message: String?, result: JsResult?): Boolean {
+                if (isFinishing || isDestroyed) {
+                    result?.cancel()
+                    return false
+                }
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("操作确认")
+                    .setMessage(message ?: "")
+                    .setPositiveButton("确定") { _, _ -> result?.confirm() }
+                    .setNegativeButton("取消") { _, _ -> result?.cancel() }
+                    .setOnCancelListener { result?.cancel() }
+                    .show()
+                return true
+            }
+
+            override fun onJsPrompt(view: WebView?, url: String?, message: String?, defaultValue: String?, result: JsPromptResult?): Boolean {
+                if (isFinishing || isDestroyed) {
+                    result?.cancel()
+                    return false
+                }
+                val input = EditText(this@MainActivity).apply {
+                    setText(defaultValue ?: "")
+                    setSelection(text?.length ?: 0)
+                }
+                val container = FrameLayout(this@MainActivity).apply {
+                    val pad = (18 * resources.displayMetrics.density).toInt()
+                    setPadding(pad, pad / 2, pad, pad / 2)
+                    addView(input)
+                }
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle(message ?: "请输入")
+                    .setView(container)
+                    .setPositiveButton("确定") { _, _ -> result?.confirm(input.text.toString()) }
+                    .setNegativeButton("取消") { _, _ -> result?.cancel() }
+                    .setOnCancelListener { result?.cancel() }
+                    .show()
+                return true
             }
 
             override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {

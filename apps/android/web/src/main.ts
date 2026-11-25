@@ -17,11 +17,55 @@ import {
   getLocalManifest,
   getSyncStatusInfo,
   recordDomainRule,
+  recordDomainAccount,
   removeDomainRule,
+  removeDomainAccount,
   testWebDAVConnection,
   performWebDAVSync,
   type WebDAVConfig
 } from './services/webdavSyncService';
+
+/**
+ * 移动端主口令内存会话管理器 (15分钟 TTL 安全生命周期)
+ */
+let sessionMasterMantra = '';
+let sessionMantraTimer: any = null;
+
+export function getSessionMasterMantra(): string {
+  const topInput = document.getElementById('input-mantra') as HTMLInputElement | null;
+  if (topInput && topInput.value.trim()) {
+    sessionMasterMantra = topInput.value.trim();
+  }
+  return sessionMasterMantra;
+}
+
+export function setSessionMasterMantra(mantra: string) {
+  sessionMasterMantra = mantra.trim();
+  const topInput = document.getElementById('input-mantra') as HTMLInputElement | null;
+  if (topInput && topInput.value !== mantra) {
+    topInput.value = mantra;
+    // 触发金丝雀校验更新
+    const tagCanary = document.getElementById('tag-canary');
+    if (tagCanary) {
+      if (mantra.trim()) {
+        computeCanary(mantra).then((canary) => {
+          tagCanary.textContent = `校验码: ${canary}`;
+        });
+      } else {
+        tagCanary.textContent = '校验码: --';
+      }
+    }
+  }
+  if (sessionMantraTimer) clearTimeout(sessionMantraTimer);
+  if (sessionMasterMantra) {
+    sessionMantraTimer = setTimeout(() => {
+      sessionMasterMantra = '';
+      if (topInput) topInput.value = '';
+      showToast('⏳ 15分钟会话保护期已过，主口令已自动隐蔽');
+      (window as any).__refreshWebDAVRulesList?.();
+    }, 15 * 60 * 1000);
+  }
+}
 
 /**
  * RFC 3492 Punycode 解码器，用于将 xn-- 开头的国际化域名还原为人类可读的 Unicode 中文
@@ -140,86 +184,7 @@ function mountApp() {
       </header>
 
       <main class="app-main">
-        <!-- 1. 核心主要功能置顶：确定性密码现场生成与派生 -->
-        <section class="card crypto-card" id="card-generator">
-          <div class="card-header">
-            <span class="card-title">🔑 密码生成与现场派生</span>
-            <span class="badge-dim">本地纯计算 · 零存储</span>
-          </div>
-
-          <div class="crypto-body">
-            <!-- 主口令输入 -->
-            <div class="input-group">
-              <div class="input-header">
-                <label class="input-label" for="input-mantra">主口令 (Master Mantra)</label>
-                <span class="canary-tag" id="tag-canary" title="金丝雀防手抖校验码">校验码: --</span>
-              </div>
-              <div class="input-with-action">
-                <input
-                  type="password"
-                  id="input-mantra"
-                  class="cyber-input"
-                  placeholder="输入您的唯一记忆口令..."
-                  autocomplete="off"
-                  value=""
-                />
-                <button type="button" class="btn-toggle-visibility" id="btn-toggle-pwd" title="点击显示明文">🙈</button>
-              </div>
-            </div>
-
-            <!-- 目标站点/账户标识 -->
-            <div class="input-group">
-              <label class="input-label" for="input-domain">目标站点或账号标识</label>
-              <input
-                type="text"
-                id="input-domain"
-                class="cyber-input"
-                placeholder="例如: github.com, weixin, 13800138000..."
-                value=""
-              />
-              <div class="domain-chips">
-                <span class="chip-item" data-val="github.com">GitHub</span>
-                <span class="chip-item" data-val="google.com">Google</span>
-                <span class="chip-item" data-val="alipay.com">支付宝</span>
-                <span class="chip-item" data-val="wechat">微信</span>
-                <span class="chip-item" data-val="apple.com">Apple ID</span>
-              </div>
-            </div>
-
-            <!-- 规则预设选择 -->
-            <div class="input-group">
-              <label class="input-label">密码规则规格</label>
-              <div class="preset-selector" id="preset-selector">
-                <button type="button" class="preset-btn active" data-preset="standard-16">16位标准</button>
-                <button type="button" class="preset-btn" data-preset="secure-20">20位高强</button>
-                <button type="button" class="preset-btn" data-preset="super-32">32位极高</button>
-                <button type="button" class="preset-btn" data-preset="alphanumeric-16">无符号</button>
-                <button type="button" class="preset-btn" data-preset="pin-6">6位PIN</button>
-              </div>
-            </div>
-
-            <!-- 派生结果卡片 -->
-            <div class="derived-result-box">
-              <div class="derived-meta">
-                <span class="derived-label">计算派生密码</span>
-                <span class="derived-strength" id="text-rule-desc">字母+数字+特殊符号 (16位)</span>
-              </div>
-              <div class="derived-output-row">
-                <span class="derived-val" id="text-derived-pwd" style="color: #64748b; font-size: 13px;">等待输入主口令与目标站点...</span>
-                <div style="display: flex; gap: 6px; align-items: center;">
-                  <button type="button" class="btn-save-rule" id="btn-save-rule" title="保存此规则至多端同步清单">
-                    📌 记住规则
-                  </button>
-                  <button type="button" class="btn-copy-pwd" id="btn-copy-pwd" title="一键复制" disabled>
-                    📋 复制
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- 2. 已存站点与密码速查清单 (一等公民核心资产区) -->
+        <!-- 1. 已存站点与密码速查清单 (有记录时置顶作为一等公民核心区) -->
         <section class="card vault-card" id="card-vault-list">
           <div class="card-header">
             <div style="display: flex; align-items: center; gap: 8px;">
@@ -227,6 +192,7 @@ function mountApp() {
               <span class="vault-count-badge" id="count-synced-rules">0</span>
             </div>
             <div style="display: flex; align-items: center; gap: 6px;">
+              <button type="button" class="btn-vault-header-action btn-jump-to-create" id="btn-scroll-to-create" title="录入新站点与账号">➕ 录入新账号</button>
               <button type="button" class="btn-vault-header-action" id="btn-refresh-vault" title="刷新列表">🔄 刷新</button>
             </div>
           </div>
@@ -247,6 +213,109 @@ function mountApp() {
             <!-- 站点清单容器 (默认展开，触手可及) -->
             <div class="vault-sites-list" id="synced-rules-list">
               <!-- 动态渲染站点卡片 -->
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. 录入新账号与确定性密码现场派生 (位于清单下方) -->
+        <section class="card crypto-card" id="card-generator">
+          <div class="card-header">
+            <span class="card-title">➕ 录入新账号与现场派生</span>
+            <span class="badge-dim">本地纯计算 · 零存储</span>
+          </div>
+
+          <div class="crypto-body">
+            <!-- 目标站点/账户标识 -->
+            <div class="input-group">
+              <label class="input-label" for="input-domain">目标站点或服务域名 <span class="required-star">*</span></label>
+              <input
+                type="text"
+                id="input-domain"
+                class="cyber-input"
+                placeholder="例如: github.com, weixin, 13800138000..."
+                value=""
+              />
+              <div class="domain-chips">
+                <span class="chip-item" data-val="github.com">GitHub</span>
+                <span class="chip-item" data-val="google.com">Google</span>
+                <span class="chip-item" data-val="alipay.com">支付宝</span>
+                <span class="chip-item" data-val="wechat">微信</span>
+                <span class="chip-item" data-val="apple.com">Apple ID</span>
+              </div>
+            </div>
+
+            <!-- 别名与账号 (可选) -->
+            <div class="input-row-flex">
+              <div class="input-group" style="flex: 1;">
+                <label class="input-label" for="input-domain-alias">站点别名/备注名 (可选)</label>
+                <input
+                  type="text"
+                  id="input-domain-alias"
+                  class="cyber-input"
+                  placeholder="例如: 三毛专线、公司内部"
+                  value=""
+                />
+              </div>
+              <div class="input-group" style="flex: 1;">
+                <label class="input-label" for="input-domain-user">登录账号/用户名 (可选)</label>
+                <input
+                  type="text"
+                  id="input-domain-user"
+                  class="cyber-input"
+                  placeholder="例如: admin / 手机号"
+                  value=""
+                />
+              </div>
+            </div>
+
+            <!-- 规则预设选择 -->
+            <div class="input-group">
+              <label class="input-label">密码规则规格</label>
+              <div class="preset-selector" id="preset-selector">
+                <button type="button" class="preset-btn active" data-preset="standard-16">16位标准</button>
+                <button type="button" class="preset-btn" data-preset="secure-20">20位高强</button>
+                <button type="button" class="preset-btn" data-preset="super-32">32位极高</button>
+                <button type="button" class="preset-btn" data-preset="alphanumeric-16">无符号</button>
+                <button type="button" class="preset-btn" data-preset="pin-6">6位PIN</button>
+              </div>
+            </div>
+
+            <!-- 主口令输入 -->
+            <div class="input-group">
+              <div class="input-header">
+                <label class="input-label" for="input-mantra">主口令 (Master Mantra)</label>
+                <span class="canary-tag" id="tag-canary" title="金丝雀防手抖校验码">校验码: --</span>
+              </div>
+              <div class="input-with-action">
+                <input
+                  type="password"
+                  id="input-mantra"
+                  class="cyber-input"
+                  placeholder="输入您的唯一记忆口令..."
+                  autocomplete="off"
+                  value=""
+                />
+                <button type="button" class="btn-toggle-visibility" id="btn-toggle-pwd" title="点击显示明文">🙈</button>
+              </div>
+            </div>
+
+            <!-- 派生结果卡片 -->
+            <div class="derived-result-box">
+              <div class="derived-meta">
+                <span class="derived-label">计算派生密码</span>
+                <span class="derived-strength" id="text-rule-desc">字母+数字+特殊符号 (16位)</span>
+              </div>
+              <div class="derived-output-row">
+                <span class="derived-val" id="text-derived-pwd" style="color: #64748b; font-size: 13px;">等待输入主口令与目标站点...</span>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                  <button type="button" class="btn-save-rule" id="btn-save-rule" title="保存此规则与账号至多端清单">
+                    📌 记住账号规则
+                  </button>
+                  <button type="button" class="btn-copy-pwd" id="btn-copy-pwd" title="一键复制" disabled>
+                    📋 复制
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -514,6 +583,8 @@ if (document.readyState === 'loading') {
 function setupPasswordGenerator() {
   const inputMantra = document.getElementById('input-mantra') as HTMLInputElement | null;
   const inputDomain = document.getElementById('input-domain') as HTMLInputElement | null;
+  const inputDomainAlias = document.getElementById('input-domain-alias') as HTMLInputElement | null;
+  const inputDomainUser = document.getElementById('input-domain-user') as HTMLInputElement | null;
   const btnTogglePwd = document.getElementById('btn-toggle-pwd') as HTMLButtonElement | null;
   const tagCanary = document.getElementById('tag-canary') as HTMLElement | null;
   const textDerivedPwd = document.getElementById('text-derived-pwd') as HTMLElement | null;
@@ -525,15 +596,22 @@ function setupPasswordGenerator() {
 
   let currentPreset: RulePreset = 'standard-16';
 
+  // 绑定头部快捷跳转录入按钮
+  document.getElementById('btn-scroll-to-create')?.addEventListener('click', () => {
+    document.getElementById('card-generator')?.scrollIntoView({ behavior: 'smooth' });
+    inputDomain?.focus();
+  });
+
   // 计算并渲染派生结果
   async function compute() {
-    if (!inputMantra || !inputDomain || !textDerivedPwd) return;
-    const mantra = inputMantra.value || '';
-    const domain = inputDomain.value || '';
+    if (!inputDomain || !textDerivedPwd) return;
+    const mantra = (inputMantra?.value || getSessionMasterMantra() || '').trim();
+    const domain = (inputDomain.value || '').trim();
+    const user = (inputDomainUser?.value || '').trim();
 
     // 更新金丝雀校验码
     if (tagCanary) {
-      if (mantra.trim()) {
+      if (mantra) {
         const canary = await computeCanary(mantra);
         tagCanary.textContent = `校验码: ${canary}`;
       } else {
@@ -541,10 +619,10 @@ function setupPasswordGenerator() {
       }
     }
 
-    if (!mantra.trim() || !domain.trim()) {
-      if (!mantra.trim() && !domain.trim()) {
+    if (!mantra || !domain) {
+      if (!mantra && !domain) {
         textDerivedPwd.textContent = '等待输入主口令与目标站点...';
-      } else if (!mantra.trim()) {
+      } else if (!mantra) {
         textDerivedPwd.textContent = '等待输入主口令...';
       } else {
         textDerivedPwd.textContent = '等待输入目标标识...';
@@ -555,7 +633,7 @@ function setupPasswordGenerator() {
     }
 
     try {
-      const derived = await deriveSitePassword(mantra, domain, '', 1, currentPreset);
+      const derived = await deriveSitePassword(mantra, domain, user, 1, currentPreset);
       textDerivedPwd.textContent = derived;
       textDerivedPwd.style.color = '#00f0ff';
       if (btnCopyPwd) btnCopyPwd.disabled = false;
@@ -566,8 +644,16 @@ function setupPasswordGenerator() {
     }
   }
 
-  // 绑定输入变动
-  inputMantra?.addEventListener('input', compute);
+  // 绑定输入变动与主口令内存缓存
+  inputMantra?.addEventListener('input', () => {
+    if (inputMantra.value) {
+      setSessionMasterMantra(inputMantra.value);
+    }
+    compute();
+  });
+
+  inputDomainUser?.addEventListener('input', compute);
+  inputDomainAlias?.addEventListener('input', compute);
 
   inputDomain?.addEventListener('input', () => {
     const dVal = (inputDomain.value || '').trim().toLowerCase();
@@ -587,6 +673,9 @@ function setupPasswordGenerator() {
           textRuleDesc.textContent = RULE_PRESETS[savedPreset].description + ' (已匹配保存规则)';
         }
       }
+      if (manifest.domains[dVal].displayName && inputDomainAlias && !inputDomainAlias.value) {
+        inputDomainAlias.value = manifest.domains[dVal].displayName;
+      }
     }
     compute();
   });
@@ -605,19 +694,28 @@ function setupPasswordGenerator() {
     }
   });
 
-  // 记住当前规则至同步清单
+  // 记住当前规则与账号至同步清单
   btnSaveRule?.addEventListener('click', () => {
     const dVal = (inputDomain?.value || '').trim();
     if (!dVal) {
-      alert('请先输入目标站点或账号标识（例如 github.com）');
+      showToast('⚠️ 请先输入目标站点或服务域名（例如 github.com）');
+      inputDomain?.focus();
       return;
     }
-    recordDomainRule(dVal, currentPreset);
+    const aliasVal = (inputDomainAlias?.value || '').trim();
+    const userVal = (inputDomainUser?.value || '').trim();
+    if (userVal) {
+      recordDomainAccount(dVal, userVal, 1, currentPreset, aliasVal);
+    } else {
+      recordDomainRule(dVal, currentPreset, aliasVal);
+    }
     btnSaveRule.textContent = '✅ 已记住！';
     (window as any).__refreshWebDAVRulesList?.();
+    showToast(`🎉 成功保存站点 [${aliasVal || dVal}] 规则！`);
     setTimeout(() => {
-      btnSaveRule.textContent = '📌 记住规则';
-    }, 1500);
+      btnSaveRule.textContent = '📌 记住账号规则';
+      document.getElementById('card-vault-list')?.scrollIntoView({ behavior: 'smooth' });
+    }, 700);
   });
 
   // 绑定快速站点标签
@@ -853,11 +951,17 @@ function setupWebDAVSync() {
             <span class="empty-icon">📂</span>
             <div class="empty-title">暂无已保存的站点与账号</div>
             <div class="empty-text">
-              1. 在上方输入目标站点计算后点击「📌 记住规则」加入清单；<br/>
-              2. 或在下方配置 WebDAV 一键双向同步即可同步全量密码库！
+              在下方录入新站点并点击「📌 记住账号规则」即可加入清单；<br/>
+              或配置 WebDAV 一键双向同步即可同步全量密码库！
             </div>
+            <button type="button" class="btn-quick-new-entry" id="btn-empty-create-site">➕ 立即录入新账号</button>
           </div>
         `;
+        document.getElementById('btn-empty-create-site')?.addEventListener('click', () => {
+          document.getElementById('card-generator')?.scrollIntoView({ behavior: 'smooth' });
+          const inpDom = document.getElementById('input-domain') as HTMLInputElement | null;
+          inpDom?.focus();
+        });
       }
       return;
     }
@@ -890,17 +994,32 @@ function setupWebDAVSync() {
                 <div class="acc-meta-left">
                   <span class="acc-user-badge">👤 ${acc.username}</span>
                   <span class="acc-ver-badge">v${acc.version || 1}</span>
+                  ${acc.serviceKey ? `<span class="acc-tag-badge">🏷️ ${acc.serviceKey}</span>` : ''}
                 </div>
                 <div class="acc-actions-right">
-                  <button type="button" class="btn-acc-action btn-load-to-panel" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-preset="${item.rulePreset}" title="载入到上方主面板计算">
+                  <button type="button" class="btn-acc-action btn-load-to-panel" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-preset="${item.rulePreset}" data-name="${item.displayName || ''}" title="载入到下方表单">
                     ⚡ 载入
                   </button>
-                  <button type="button" class="btn-acc-action btn-copy-site-pwd" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-title="${displayTitle}" title="直接计算并复制密码">
+                  <button type="button" class="btn-acc-action btn-copy-site-pwd" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-title="${displayTitle}" data-unlock="unlock-${accSafeId}" title="直接计算并复制密码">
                     📋 复制密码
                   </button>
-                  <button type="button" class="btn-acc-action btn-peek-site-pwd" data-target="peek-${accSafeId}" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" title="查看计算密码">
+                  <button type="button" class="btn-acc-action btn-peek-site-pwd" data-target="peek-${accSafeId}" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-unlock="unlock-${accSafeId}" title="查看计算密码">
                     👁️
                   </button>
+                </div>
+              </div>
+              <!-- 专属内联主口令现场解锁条 (会话未解锁时点击复制或查看就地展开) -->
+              <div class="vault-inline-unlock-row" id="unlock-${accSafeId}" style="display: none;">
+                <div class="unlock-header-tip">
+                  <span>🔑 输入主口令派生此记录</span>
+                  <span class="unlock-canary-badge" id="canary-unlock-${accSafeId}">校验码: --</span>
+                </div>
+                <div class="unlock-input-wrap">
+                  <input type="password" class="unlock-mantra-input cyber-input" id="input-unlock-${accSafeId}" placeholder="输入主口令..." autocomplete="off" />
+                  <button type="button" class="btn-toggle-unlock-pwd" data-input="input-unlock-${accSafeId}" title="显隐">🙈</button>
+                  <button type="button" class="btn-submit-unlock" data-input="input-unlock-${accSafeId}" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-target-peek="peek-${accSafeId}" data-unlock="unlock-${accSafeId}">派生查看</button>
+                  <button type="button" class="btn-submit-unlock-copy" data-input="input-unlock-${accSafeId}" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-title="${displayTitle}" data-unlock="unlock-${accSafeId}">派生复制</button>
+                  <button type="button" class="btn-cancel-unlock" data-unlock="unlock-${accSafeId}">✕</button>
                 </div>
               </div>
               <div class="vault-peek-pwd-bar" id="peek-${accSafeId}" style="display: none;">
@@ -917,15 +1036,29 @@ function setupWebDAVSync() {
                 <span class="acc-user-badge default-key">默认凭据 (未指定账号)</span>
               </div>
               <div class="acc-actions-right">
-                <button type="button" class="btn-acc-action btn-load-to-panel" data-domain="${item.canonicalDomain}" data-user="" data-preset="${item.rulePreset}" title="载入到上方主面板计算">
+                <button type="button" class="btn-acc-action btn-load-to-panel" data-domain="${item.canonicalDomain}" data-user="" data-preset="${item.rulePreset}" data-name="${item.displayName || ''}" title="载入到下方表单">
                   ⚡ 载入
                 </button>
-                <button type="button" class="btn-acc-action btn-copy-site-pwd" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-title="${displayTitle}" title="直接计算并复制密码">
+                <button type="button" class="btn-acc-action btn-copy-site-pwd" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-title="${displayTitle}" data-unlock="unlock-${defaultSafeId}" title="直接计算并复制密码">
                   📋 复制密码
                 </button>
-                <button type="button" class="btn-acc-action btn-peek-site-pwd" data-target="peek-${defaultSafeId}" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" title="查看计算密码">
+                <button type="button" class="btn-acc-action btn-peek-site-pwd" data-target="peek-${defaultSafeId}" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-unlock="unlock-${defaultSafeId}" title="查看计算密码">
                   👁️
                 </button>
+              </div>
+            </div>
+            <!-- 专属内联主口令现场解锁条 (会话未解锁时点击复制或查看就地展开) -->
+            <div class="vault-inline-unlock-row" id="unlock-${defaultSafeId}" style="display: none;">
+              <div class="unlock-header-tip">
+                <span>🔑 输入主口令派生此记录</span>
+                <span class="unlock-canary-badge" id="canary-unlock-${defaultSafeId}">校验码: --</span>
+              </div>
+              <div class="unlock-input-wrap">
+                <input type="password" class="unlock-mantra-input cyber-input" id="input-unlock-${defaultSafeId}" placeholder="输入主口令..." autocomplete="off" />
+                <button type="button" class="btn-toggle-unlock-pwd" data-input="input-unlock-${defaultSafeId}" title="显隐">🙈</button>
+                <button type="button" class="btn-submit-unlock" data-input="input-unlock-${defaultSafeId}" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-target-peek="peek-${defaultSafeId}" data-unlock="unlock-${defaultSafeId}">派生查看</button>
+                <button type="button" class="btn-submit-unlock-copy" data-input="input-unlock-${defaultSafeId}" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-title="${displayTitle}" data-unlock="unlock-${defaultSafeId}">派生复制</button>
+                <button type="button" class="btn-cancel-unlock" data-unlock="unlock-${defaultSafeId}">✕</button>
               </div>
             </div>
             <div class="vault-peek-pwd-bar" id="peek-${defaultSafeId}" style="display: none;">
@@ -939,15 +1072,23 @@ function setupWebDAVSync() {
           <div class="vault-site-card" data-domain="${item.canonicalDomain}">
             <div class="vault-site-header">
               <div class="vault-site-info">
-                <div class="vault-site-title-row">
-                  <span class="vault-site-name">${hasCustomAlias ? '🏷️ ' : '🌐 '}${displayTitle}</span>
-                  <button type="button" class="btn-edit-alias-inline" data-domain="${item.canonicalDomain}" data-name="${item.displayName || ''}" title="修改站点别名/备注">✏️</button>
+                <div class="vault-site-title-row" id="title-row-${safeDomainId}">
+                  <span class="vault-site-name" id="name-label-${safeDomainId}">${hasCustomAlias ? '🏷️ ' : '🌐 '}${displayTitle}</span>
+                  <button type="button" class="btn-edit-alias-inline" data-domain="${item.canonicalDomain}" data-name="${item.displayName || ''}" data-target="title-row-${safeDomainId}" title="修改站点别名/备注">✏️</button>
                 </div>
                 ${subDomainText ? `<span class="vault-site-sub">🌐 ${subDomainText}</span>` : ''}
               </div>
               <div class="vault-site-meta">
                 <span class="vault-preset-pill">${presetName}</span>
-                <button type="button" class="btn-del-site-rule" data-del="${item.canonicalDomain}" data-name="${displayTitle}" title="从清单移除">✕</button>
+                <button type="button" class="btn-del-site-rule" data-del="${item.canonicalDomain}" data-target="del-bar-${safeDomainId}" title="从清单移除">✕</button>
+              </div>
+            </div>
+            <!-- 删除二次确认条 (就地展开，免原生 confirm) -->
+            <div class="vault-del-confirm-bar" id="del-bar-${safeDomainId}" style="display: none;">
+              <span class="del-confirm-text">确定移除 [${displayTitle}] 吗？</span>
+              <div class="del-confirm-actions">
+                <button type="button" class="btn-confirm-del-btn btn-do-del" data-del="${item.canonicalDomain}" data-name="${displayTitle}">确认移除</button>
+                <button type="button" class="btn-confirm-del-btn btn-cancel-del" data-target="del-bar-${safeDomainId}">取消</button>
               </div>
             </div>
             <div class="vault-accounts-box">
@@ -958,44 +1099,54 @@ function setupWebDAVSync() {
       })
       .join('');
 
-    // 事件绑定: 载入主面板
+    // 事件绑定: 载入主面板 (彻底修复 inputDomain is not defined)
     syncedRulesList.querySelectorAll('.btn-load-to-panel').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const dom = btn.getAttribute('data-domain') || '';
         const preset = (btn.getAttribute('data-preset') as RulePreset) || 'standard-16';
-        if (inputDomain) {
-          inputDomain.value = dom;
-        }
+        const user = btn.getAttribute('data-user') || '';
+        const name = btn.getAttribute('data-name') || '';
+
+        const inpDomain = document.getElementById('input-domain') as HTMLInputElement | null;
+        const inpAlias = document.getElementById('input-domain-alias') as HTMLInputElement | null;
+        const inpUser = document.getElementById('input-domain-user') as HTMLInputElement | null;
+        const inpMantra = document.getElementById('input-mantra') as HTMLInputElement | null;
+        const presetSelector = document.getElementById('preset-selector');
+        const textRuleDesc = document.getElementById('text-rule-desc');
+
+        if (inpDomain) inpDomain.value = dom;
+        if (inpAlias) inpAlias.value = name;
+        if (inpUser) inpUser.value = user;
+
         if (RULE_PRESETS[preset]) {
-          currentPreset = preset;
           presetSelector?.querySelectorAll('.preset-btn').forEach((b) => {
-            if (b.getAttribute('data-preset') === preset) {
-              b.classList.add('active');
-            } else {
-              b.classList.remove('active');
-            }
+            if (b.getAttribute('data-preset') === preset) b.classList.add('active');
+            else b.classList.remove('active');
           });
           if (textRuleDesc) {
             textRuleDesc.textContent = RULE_PRESETS[preset].description + ' (已匹配站点规则)';
           }
         }
-        compute();
+
+        inpDomain?.dispatchEvent(new Event('input', { bubbles: true }));
         document.getElementById('card-generator')?.scrollIntoView({ behavior: 'smooth' });
-        if (!inputMantra?.value?.trim()) {
-          inputMantra?.focus();
-          showToast(`已载入站点 [${dom}]，请输入主口令查看计算密码`);
+        if (!getSessionMasterMantra()) {
+          inpMantra?.focus();
+          showToast(`已载入站点 [${dom}]，请输入主口令现场派生`);
         } else {
           showToast(`已载入站点 [${dom}]，密码已现场计算`);
         }
       });
     });
 
-    // 事件绑定: 现场计算并复制密码
+    // 事件绑定: 现场计算并复制密码 (支持卡片内专属解锁)
     syncedRulesList.querySelectorAll('.btn-copy-site-pwd').forEach((btn) => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        const mantra = inputMantra?.value?.trim() || '';
+        const mantra = getSessionMasterMantra();
+        const unlockId = btn.getAttribute('data-unlock') || '';
+        const unlockEl = unlockId ? document.getElementById(unlockId) : null;
         const dom = btn.getAttribute('data-domain') || '';
         const user = btn.getAttribute('data-user') || '';
         const ver = parseInt(btn.getAttribute('data-ver') || '1', 10);
@@ -1003,9 +1154,12 @@ function setupWebDAVSync() {
         const title = btn.getAttribute('data-title') || dom;
 
         if (!mantra) {
-          document.getElementById('card-generator')?.scrollIntoView({ behavior: 'smooth' });
-          inputMantra?.focus();
-          showToast('💡 请先在上方输入您的主口令，即可一键复制密码');
+          if (unlockEl) {
+            unlockEl.style.display = unlockEl.style.display === 'none' ? 'flex' : 'none';
+            const inp = unlockEl.querySelector('.unlock-mantra-input') as HTMLInputElement | null;
+            inp?.focus();
+          }
+          showToast('🔑 请输入主口令现场派生此记录');
           return;
         }
 
@@ -1027,11 +1181,13 @@ function setupWebDAVSync() {
       });
     });
 
-    // 事件绑定: 睁眼查看计算密码 (5秒后自动隐蔽)
+    // 事件绑定: 睁眼查看计算密码 (5秒后自动隐蔽，支持卡片内专属解锁)
     syncedRulesList.querySelectorAll('.btn-peek-site-pwd').forEach((btn) => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        const mantra = inputMantra?.value?.trim() || '';
+        const mantra = getSessionMasterMantra();
+        const unlockId = btn.getAttribute('data-unlock') || '';
+        const unlockEl = unlockId ? document.getElementById(unlockId) : null;
         const dom = btn.getAttribute('data-domain') || '';
         const user = btn.getAttribute('data-user') || '';
         const ver = parseInt(btn.getAttribute('data-ver') || '1', 10);
@@ -1040,9 +1196,12 @@ function setupWebDAVSync() {
         const targetEl = document.getElementById(targetId);
 
         if (!mantra) {
-          document.getElementById('card-generator')?.scrollIntoView({ behavior: 'smooth' });
-          inputMantra?.focus();
-          showToast('💡 请先在上方输入您的主口令，即可查看密码');
+          if (unlockEl) {
+            unlockEl.style.display = unlockEl.style.display === 'none' ? 'flex' : 'none';
+            const inp = unlockEl.querySelector('.unlock-mantra-input') as HTMLInputElement | null;
+            inp?.focus();
+          }
+          showToast('🔑 请输入主口令现场派生此记录');
           return;
         }
 
@@ -1080,37 +1239,201 @@ function setupWebDAVSync() {
       });
     });
 
-    // 事件绑定: 修改别名
+    // 事件绑定: 卡片内专属内联解锁交互 (输入口令、实时金丝雀、派生查看/复制)
+    syncedRulesList.querySelectorAll('.vault-inline-unlock-row').forEach((row) => {
+      const inpMantra = row.querySelector('.unlock-mantra-input') as HTMLInputElement | null;
+      const canaryBadge = row.querySelector('.unlock-canary-badge') as HTMLElement | null;
+      const btnToggle = row.querySelector('.btn-toggle-unlock-pwd') as HTMLButtonElement | null;
+      const btnUnlockPeek = row.querySelector('.btn-submit-unlock') as HTMLButtonElement | null;
+      const btnUnlockCopy = row.querySelector('.btn-submit-unlock-copy') as HTMLButtonElement | null;
+      const btnCancel = row.querySelector('.btn-cancel-unlock') as HTMLButtonElement | null;
+
+      // 实时金丝雀校验
+      inpMantra?.addEventListener('input', async () => {
+        const val = (inpMantra.value || '').trim();
+        if (canaryBadge) {
+          if (val) {
+            const canary = await computeCanary(val);
+            canaryBadge.textContent = `校验码: ${canary}`;
+          } else {
+            canaryBadge.textContent = '校验码: --';
+          }
+        }
+      });
+
+      // 切换显隐
+      btnToggle?.addEventListener('click', () => {
+        if (!inpMantra) return;
+        const isPwd = inpMantra.type === 'password';
+        inpMantra.type = isPwd ? 'text' : 'password';
+        btnToggle.textContent = isPwd ? '👁️' : '🙈';
+      });
+
+      // 取消关闭
+      btnCancel?.addEventListener('click', () => {
+        (row as HTMLElement).style.display = 'none';
+      });
+
+      // 派生查看
+      btnUnlockPeek?.addEventListener('click', async () => {
+        const val = (inpMantra?.value || '').trim();
+        if (!val) {
+          showToast('⚠️ 请先输入您的主口令');
+          inpMantra?.focus();
+          return;
+        }
+        setSessionMasterMantra(val);
+        (row as HTMLElement).style.display = 'none';
+
+        const dom = btnUnlockPeek.getAttribute('data-domain') || '';
+        const user = btnUnlockPeek.getAttribute('data-user') || '';
+        const ver = parseInt(btnUnlockPeek.getAttribute('data-ver') || '1', 10);
+        const preset = (btnUnlockPeek.getAttribute('data-preset') as RulePreset) || 'standard-16';
+        const targetPeekId = btnUnlockPeek.getAttribute('data-target-peek') || '';
+        const targetEl = document.getElementById(targetPeekId);
+
+        if (!targetEl) return;
+        try {
+          const pwd = await deriveSitePassword(val, dom, user, ver, preset);
+          const valEl = targetEl.querySelector('.peek-pwd-val');
+          if (valEl) valEl.textContent = pwd;
+          targetEl.style.display = 'flex';
+
+          let leftSec = 5;
+          const timerEl = targetEl.querySelector('.peek-pwd-timer');
+          const interval = setInterval(() => {
+            leftSec--;
+            if (timerEl) timerEl.textContent = `${leftSec}秒后自动隐蔽`;
+            if (leftSec <= 0) {
+              clearInterval(interval);
+              targetEl.style.display = 'none';
+              if (valEl) valEl.textContent = '••••••••••••••••';
+            }
+          }, 1000);
+          showToast('✅ 会话已解锁，密码已现场派生！');
+        } catch (err: any) {
+          showToast(`❌ 密码派生异常: ${err?.message || '未知错误'}`);
+        }
+      });
+
+      // 派生复制
+      btnUnlockCopy?.addEventListener('click', async () => {
+        const val = (inpMantra?.value || '').trim();
+        if (!val) {
+          showToast('⚠️ 请先输入您的主口令');
+          inpMantra?.focus();
+          return;
+        }
+        setSessionMasterMantra(val);
+        (row as HTMLElement).style.display = 'none';
+
+        const dom = btnUnlockCopy.getAttribute('data-domain') || '';
+        const user = btnUnlockCopy.getAttribute('data-user') || '';
+        const ver = parseInt(btnUnlockCopy.getAttribute('data-ver') || '1', 10);
+        const preset = (btnUnlockCopy.getAttribute('data-preset') as RulePreset) || 'standard-16';
+        const title = btnUnlockCopy.getAttribute('data-title') || dom;
+
+        try {
+          const pwd = await deriveSitePassword(val, dom, user, ver, preset);
+          await navigator.clipboard.writeText(pwd);
+          showToast(`🎉 已成功派生并复制 [${title}${user ? ` - ${user}` : ''}] 的密码！`);
+        } catch (err: any) {
+          showToast(`❌ 密码派生异常: ${err?.message || '未知错误'}`);
+        }
+      });
+    });
+
+    // 事件绑定: 站点别名内联就地编辑 (彻底解决手机端 prompt 失效问题)
     syncedRulesList.querySelectorAll('.btn-edit-alias-inline').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const d = btn.getAttribute('data-domain') || '';
         const curName = btn.getAttribute('data-name') || '';
-        const newAlias = window.prompt(`为站点 [${d}] 设置别名/备注名称:`, curName);
-        if (newAlias !== null) {
+        const targetRowId = btn.getAttribute('data-target') || '';
+        const targetRow = document.getElementById(targetRowId);
+
+        if (!targetRow) return;
+
+        targetRow.innerHTML = `
+          <div class="inline-alias-editor">
+            <input type="text" class="inline-alias-input cyber-input" id="alias-edit-${d}" value="${curName}" placeholder="设置别名 (如: 三毛专线)" autocomplete="off" />
+            <button type="button" class="btn-save-inline-alias" id="btn-save-alias-${d}">保存</button>
+            <button type="button" class="btn-cancel-inline-alias" id="btn-cancel-alias-${d}">取消</button>
+          </div>
+        `;
+
+        const editInput = document.getElementById(`alias-edit-${d}`) as HTMLInputElement | null;
+        const btnSave = document.getElementById(`alias-edit-${d}`)?.parentElement?.querySelector('.btn-save-inline-alias');
+        const btnCancel = document.getElementById(`alias-edit-${d}`)?.parentElement?.querySelector('.btn-cancel-inline-alias');
+
+        editInput?.focus();
+        editInput?.select();
+
+        const saveHandler = () => {
+          const newAlias = (editInput?.value || '').trim();
           const item = manifest.domains[d];
           if (item) {
-            recordDomainRule(d, item.rulePreset, newAlias.trim());
+            recordDomainRule(d, item.rulePreset, newAlias);
             renderRulesList();
             refreshStatusView();
             showToast(`✅ 已更新站点 [${d}] 的别名`);
           }
+        };
+
+        btnSave?.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          saveHandler();
+        });
+
+        btnCancel?.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          renderRulesList();
+        });
+
+        editInput?.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') {
+            ev.preventDefault();
+            saveHandler();
+          } else if (ev.key === 'Escape') {
+            ev.preventDefault();
+            renderRulesList();
+          }
+        });
+      });
+    });
+
+    // 事件绑定: 站点删除就地确认 (彻底解决手机端 confirm 失效问题)
+    syncedRulesList.querySelectorAll('.btn-del-site-rule').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const targetBarId = btn.getAttribute('data-target') || '';
+        const targetBar = document.getElementById(targetBarId);
+        if (targetBar) {
+          targetBar.style.display = targetBar.style.display === 'none' ? 'flex' : 'none';
         }
       });
     });
 
-    // 事件绑定: 删除站点规则
-    syncedRulesList.querySelectorAll('.btn-del-site-rule').forEach((btn) => {
+    syncedRulesList.querySelectorAll('.btn-do-del').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const delDomain = btn.getAttribute('data-del');
         const siteName = btn.getAttribute('data-name') || delDomain;
-        if (delDomain && window.confirm(`确定要从清单中移除站点 [${siteName}] 吗？`)) {
+        if (delDomain) {
           removeDomainRule(delDomain);
           renderRulesList();
           refreshStatusView();
           showToast(`已移除站点 [${siteName}]`);
         }
+      });
+    });
+
+    syncedRulesList.querySelectorAll('.btn-cancel-del').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const targetBarId = btn.getAttribute('data-target') || '';
+        const targetBar = document.getElementById(targetBarId);
+        if (targetBar) targetBar.style.display = 'none';
       });
     });
   }

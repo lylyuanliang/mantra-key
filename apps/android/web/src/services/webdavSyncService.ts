@@ -12,12 +12,16 @@ export interface AccountEntry {
   version: number;
   updatedAt: number;
   isDeleted: boolean;
+  serviceKey?: string;
+  aliases?: string[];
 }
 
 export interface DomainRuleEntry {
   canonicalDomain: string;
   displayName: string;
   rulePreset: string;
+  serviceKey?: string;
+  associatedDomains?: string[];
   accounts: Record<string, AccountEntry>;
   updatedAt: number;
 }
@@ -140,7 +144,12 @@ export function saveSyncStatusInfo(info: SyncStatusInfo) {
 }
 
 // 记录/更新单个站点规则到本地清单
-export function recordDomainRule(canonicalDomain: string, rulePreset: string, displayName = ''): MantraManifest {
+export function recordDomainRule(
+  canonicalDomain: string,
+  rulePreset: string,
+  displayName = '',
+  serviceKey?: string
+): MantraManifest {
   const manifest = getLocalManifest();
   const domainKey = canonicalDomain.trim().toLowerCase();
   if (!domainKey) return manifest;
@@ -150,13 +159,77 @@ export function recordDomainRule(canonicalDomain: string, rulePreset: string, di
 
   manifest.domains[domainKey] = {
     canonicalDomain: domainKey,
-    displayName: displayName || existing?.displayName || domainKey,
-    rulePreset: rulePreset,
+    displayName: displayName !== '' ? displayName : (existing?.displayName || domainKey),
+    rulePreset: rulePreset || existing?.rulePreset || 'standard-16',
+    serviceKey: serviceKey !== undefined ? serviceKey : existing?.serviceKey,
+    associatedDomains: existing?.associatedDomains,
     accounts: existing?.accounts || {},
     updatedAt: now
   };
   manifest.updatedAt = now;
   saveLocalManifest(manifest);
+  return manifest;
+}
+
+// 记录/更新单个账号到指定站点
+export function recordDomainAccount(
+  canonicalDomain: string,
+  username: string,
+  version = 1,
+  rulePreset?: string,
+  displayName = '',
+  serviceKey?: string,
+  aliases?: string[]
+): MantraManifest {
+  const manifest = getLocalManifest();
+  const domainKey = canonicalDomain.trim().toLowerCase();
+  if (!domainKey) return manifest;
+
+  const now = Date.now();
+  const existing = manifest.domains[domainKey];
+  const accounts = { ...(existing?.accounts || {}) };
+
+  const userKey = username.trim() || 'default';
+  const existingAcc = accounts[userKey];
+
+  accounts[userKey] = {
+    username: username.trim(),
+    version: version > 0 ? version : 1,
+    serviceKey: serviceKey || existingAcc?.serviceKey,
+    aliases: aliases || existingAcc?.aliases,
+    updatedAt: now,
+    isDeleted: false
+  };
+
+  manifest.domains[domainKey] = {
+    canonicalDomain: domainKey,
+    displayName: displayName !== '' ? displayName : (existing?.displayName || domainKey),
+    rulePreset: rulePreset || existing?.rulePreset || 'standard-16',
+    serviceKey: serviceKey || existing?.serviceKey,
+    associatedDomains: existing?.associatedDomains,
+    accounts,
+    updatedAt: now
+  };
+  manifest.updatedAt = now;
+  saveLocalManifest(manifest);
+  return manifest;
+}
+
+// 移除单个账号
+export function removeDomainAccount(canonicalDomain: string, username: string): MantraManifest {
+  const manifest = getLocalManifest();
+  const domainKey = canonicalDomain.trim().toLowerCase();
+  if (!domainKey || !manifest.domains[domainKey]) return manifest;
+
+  const existing = manifest.domains[domainKey];
+  const userKey = username.trim() || 'default';
+  if (existing.accounts && existing.accounts[userKey]) {
+    existing.accounts[userKey].isDeleted = true;
+    existing.accounts[userKey].updatedAt = Date.now();
+    existing.updatedAt = Date.now();
+    manifest.updatedAt = Date.now();
+    saveLocalManifest(manifest);
+  }
   return manifest;
 }
 
@@ -211,6 +284,8 @@ export function mergeManifests(local: MantraManifest, remote: MantraManifest): M
         canonicalDomain: newerDomain.canonicalDomain,
         displayName: newerDomain.displayName || localDomain.displayName,
         rulePreset: newerDomain.rulePreset || localDomain.rulePreset,
+        serviceKey: newerDomain.serviceKey || localDomain.serviceKey,
+        associatedDomains: newerDomain.associatedDomains || localDomain.associatedDomains,
         accounts: combinedAccounts,
         updatedAt: Math.max(localDomain.updatedAt, remoteDomain.updatedAt)
       };

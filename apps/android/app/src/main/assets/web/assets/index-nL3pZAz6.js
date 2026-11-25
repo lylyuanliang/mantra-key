@@ -109,7 +109,7 @@ const __vitePreload = function preload(baseModule, deps, importerUrl) {
   });
 };
 const acceleratorPrefix = "https://ghproxy.net/";
-const version = "0.1.1.202611241925";
+const version = "0.1.1.202611250920";
 const defaultConfig = {
   acceleratorPrefix,
   version
@@ -464,7 +464,7 @@ function saveSyncStatusInfo(info) {
   } catch {
   }
 }
-function recordDomainRule(canonicalDomain, rulePreset, displayName = "") {
+function recordDomainRule(canonicalDomain, rulePreset, displayName = "", serviceKey) {
   const manifest = getLocalManifest();
   const domainKey = canonicalDomain.trim().toLowerCase();
   if (!domainKey) return manifest;
@@ -472,9 +472,41 @@ function recordDomainRule(canonicalDomain, rulePreset, displayName = "") {
   const existing = manifest.domains[domainKey];
   manifest.domains[domainKey] = {
     canonicalDomain: domainKey,
-    displayName: displayName || (existing == null ? void 0 : existing.displayName) || domainKey,
-    rulePreset,
+    displayName: displayName !== "" ? displayName : (existing == null ? void 0 : existing.displayName) || domainKey,
+    rulePreset: rulePreset || (existing == null ? void 0 : existing.rulePreset) || "standard-16",
+    serviceKey: existing == null ? void 0 : existing.serviceKey,
+    associatedDomains: existing == null ? void 0 : existing.associatedDomains,
     accounts: (existing == null ? void 0 : existing.accounts) || {},
+    updatedAt: now
+  };
+  manifest.updatedAt = now;
+  saveLocalManifest(manifest);
+  return manifest;
+}
+function recordDomainAccount(canonicalDomain, username, version2 = 1, rulePreset, displayName = "", serviceKey, aliases) {
+  const manifest = getLocalManifest();
+  const domainKey = canonicalDomain.trim().toLowerCase();
+  if (!domainKey) return manifest;
+  const now = Date.now();
+  const existing = manifest.domains[domainKey];
+  const accounts = { ...(existing == null ? void 0 : existing.accounts) || {} };
+  const userKey = username.trim() || "default";
+  const existingAcc = accounts[userKey];
+  accounts[userKey] = {
+    username: username.trim(),
+    version: version2 > 0 ? version2 : 1,
+    serviceKey: existingAcc == null ? void 0 : existingAcc.serviceKey,
+    aliases: existingAcc == null ? void 0 : existingAcc.aliases,
+    updatedAt: now,
+    isDeleted: false
+  };
+  manifest.domains[domainKey] = {
+    canonicalDomain: domainKey,
+    displayName: displayName !== "" ? displayName : (existing == null ? void 0 : existing.displayName) || domainKey,
+    rulePreset: rulePreset || (existing == null ? void 0 : existing.rulePreset) || "standard-16",
+    serviceKey: existing == null ? void 0 : existing.serviceKey,
+    associatedDomains: existing == null ? void 0 : existing.associatedDomains,
+    accounts,
     updatedAt: now
   };
   manifest.updatedAt = now;
@@ -519,6 +551,8 @@ function mergeManifests(local, remote) {
         canonicalDomain: newerDomain.canonicalDomain,
         displayName: newerDomain.displayName || localDomain.displayName,
         rulePreset: newerDomain.rulePreset || localDomain.rulePreset,
+        serviceKey: newerDomain.serviceKey || localDomain.serviceKey,
+        associatedDomains: newerDomain.associatedDomains || localDomain.associatedDomains,
         accounts: combinedAccounts,
         updatedAt: Math.max(localDomain.updatedAt, remoteDomain.updatedAt)
       };
@@ -835,6 +869,42 @@ async function performWebDAVSync(config, onNeedPassword) {
     upgradedToEncrypted
   };
 }
+let sessionMasterMantra = "";
+let sessionMantraTimer = null;
+function getSessionMasterMantra() {
+  const topInput = document.getElementById("input-mantra");
+  if (topInput && topInput.value.trim()) {
+    sessionMasterMantra = topInput.value.trim();
+  }
+  return sessionMasterMantra;
+}
+function setSessionMasterMantra(mantra) {
+  sessionMasterMantra = mantra.trim();
+  const topInput = document.getElementById("input-mantra");
+  if (topInput && topInput.value !== mantra) {
+    topInput.value = mantra;
+    const tagCanary = document.getElementById("tag-canary");
+    if (tagCanary) {
+      if (mantra.trim()) {
+        computeCanary(mantra).then((canary) => {
+          tagCanary.textContent = `校验码: ${canary}`;
+        });
+      } else {
+        tagCanary.textContent = "校验码: --";
+      }
+    }
+  }
+  if (sessionMantraTimer) clearTimeout(sessionMantraTimer);
+  if (sessionMasterMantra) {
+    sessionMantraTimer = setTimeout(() => {
+      var _a;
+      sessionMasterMantra = "";
+      if (topInput) topInput.value = "";
+      showToast("⏳ 15分钟会话保护期已过，主口令已自动隐蔽");
+      (_a = window.__refreshWebDAVRulesList) == null ? void 0 : _a.call(window);
+    }, 15 * 60 * 1e3);
+  }
+}
 function decodePunycodePart(input) {
   const maxInt = 2147483647;
   const base = 36;
@@ -933,86 +1003,7 @@ function mountApp() {
       </header>
 
       <main class="app-main">
-        <!-- 1. 核心主要功能置顶：确定性密码现场生成与派生 -->
-        <section class="card crypto-card" id="card-generator">
-          <div class="card-header">
-            <span class="card-title">🔑 密码生成与现场派生</span>
-            <span class="badge-dim">本地纯计算 · 零存储</span>
-          </div>
-
-          <div class="crypto-body">
-            <!-- 主口令输入 -->
-            <div class="input-group">
-              <div class="input-header">
-                <label class="input-label" for="input-mantra">主口令 (Master Mantra)</label>
-                <span class="canary-tag" id="tag-canary" title="金丝雀防手抖校验码">校验码: --</span>
-              </div>
-              <div class="input-with-action">
-                <input
-                  type="password"
-                  id="input-mantra"
-                  class="cyber-input"
-                  placeholder="输入您的唯一记忆口令..."
-                  autocomplete="off"
-                  value=""
-                />
-                <button type="button" class="btn-toggle-visibility" id="btn-toggle-pwd" title="点击显示明文">🙈</button>
-              </div>
-            </div>
-
-            <!-- 目标站点/账户标识 -->
-            <div class="input-group">
-              <label class="input-label" for="input-domain">目标站点或账号标识</label>
-              <input
-                type="text"
-                id="input-domain"
-                class="cyber-input"
-                placeholder="例如: github.com, weixin, 13800138000..."
-                value=""
-              />
-              <div class="domain-chips">
-                <span class="chip-item" data-val="github.com">GitHub</span>
-                <span class="chip-item" data-val="google.com">Google</span>
-                <span class="chip-item" data-val="alipay.com">支付宝</span>
-                <span class="chip-item" data-val="wechat">微信</span>
-                <span class="chip-item" data-val="apple.com">Apple ID</span>
-              </div>
-            </div>
-
-            <!-- 规则预设选择 -->
-            <div class="input-group">
-              <label class="input-label">密码规则规格</label>
-              <div class="preset-selector" id="preset-selector">
-                <button type="button" class="preset-btn active" data-preset="standard-16">16位标准</button>
-                <button type="button" class="preset-btn" data-preset="secure-20">20位高强</button>
-                <button type="button" class="preset-btn" data-preset="super-32">32位极高</button>
-                <button type="button" class="preset-btn" data-preset="alphanumeric-16">无符号</button>
-                <button type="button" class="preset-btn" data-preset="pin-6">6位PIN</button>
-              </div>
-            </div>
-
-            <!-- 派生结果卡片 -->
-            <div class="derived-result-box">
-              <div class="derived-meta">
-                <span class="derived-label">计算派生密码</span>
-                <span class="derived-strength" id="text-rule-desc">字母+数字+特殊符号 (16位)</span>
-              </div>
-              <div class="derived-output-row">
-                <span class="derived-val" id="text-derived-pwd" style="color: #64748b; font-size: 13px;">等待输入主口令与目标站点...</span>
-                <div style="display: flex; gap: 6px; align-items: center;">
-                  <button type="button" class="btn-save-rule" id="btn-save-rule" title="保存此规则至多端同步清单">
-                    📌 记住规则
-                  </button>
-                  <button type="button" class="btn-copy-pwd" id="btn-copy-pwd" title="一键复制" disabled>
-                    📋 复制
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- 2. 已存站点与密码速查清单 (一等公民核心资产区) -->
+        <!-- 1. 已存站点与密码速查清单 (有记录时置顶作为一等公民核心区) -->
         <section class="card vault-card" id="card-vault-list">
           <div class="card-header">
             <div style="display: flex; align-items: center; gap: 8px;">
@@ -1020,6 +1011,7 @@ function mountApp() {
               <span class="vault-count-badge" id="count-synced-rules">0</span>
             </div>
             <div style="display: flex; align-items: center; gap: 6px;">
+              <button type="button" class="btn-vault-header-action btn-jump-to-create" id="btn-scroll-to-create" title="录入新站点与账号">➕ 录入新账号</button>
               <button type="button" class="btn-vault-header-action" id="btn-refresh-vault" title="刷新列表">🔄 刷新</button>
             </div>
           </div>
@@ -1040,6 +1032,109 @@ function mountApp() {
             <!-- 站点清单容器 (默认展开，触手可及) -->
             <div class="vault-sites-list" id="synced-rules-list">
               <!-- 动态渲染站点卡片 -->
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. 录入新账号与确定性密码现场派生 (位于清单下方) -->
+        <section class="card crypto-card" id="card-generator">
+          <div class="card-header">
+            <span class="card-title">➕ 录入新账号与现场派生</span>
+            <span class="badge-dim">本地纯计算 · 零存储</span>
+          </div>
+
+          <div class="crypto-body">
+            <!-- 目标站点/账户标识 -->
+            <div class="input-group">
+              <label class="input-label" for="input-domain">目标站点或服务域名 <span class="required-star">*</span></label>
+              <input
+                type="text"
+                id="input-domain"
+                class="cyber-input"
+                placeholder="例如: github.com, weixin, 13800138000..."
+                value=""
+              />
+              <div class="domain-chips">
+                <span class="chip-item" data-val="github.com">GitHub</span>
+                <span class="chip-item" data-val="google.com">Google</span>
+                <span class="chip-item" data-val="alipay.com">支付宝</span>
+                <span class="chip-item" data-val="wechat">微信</span>
+                <span class="chip-item" data-val="apple.com">Apple ID</span>
+              </div>
+            </div>
+
+            <!-- 别名与账号 (可选) -->
+            <div class="input-row-flex">
+              <div class="input-group" style="flex: 1;">
+                <label class="input-label" for="input-domain-alias">站点别名/备注名 (可选)</label>
+                <input
+                  type="text"
+                  id="input-domain-alias"
+                  class="cyber-input"
+                  placeholder="例如: 三毛专线、公司内部"
+                  value=""
+                />
+              </div>
+              <div class="input-group" style="flex: 1;">
+                <label class="input-label" for="input-domain-user">登录账号/用户名 (可选)</label>
+                <input
+                  type="text"
+                  id="input-domain-user"
+                  class="cyber-input"
+                  placeholder="例如: admin / 手机号"
+                  value=""
+                />
+              </div>
+            </div>
+
+            <!-- 规则预设选择 -->
+            <div class="input-group">
+              <label class="input-label">密码规则规格</label>
+              <div class="preset-selector" id="preset-selector">
+                <button type="button" class="preset-btn active" data-preset="standard-16">16位标准</button>
+                <button type="button" class="preset-btn" data-preset="secure-20">20位高强</button>
+                <button type="button" class="preset-btn" data-preset="super-32">32位极高</button>
+                <button type="button" class="preset-btn" data-preset="alphanumeric-16">无符号</button>
+                <button type="button" class="preset-btn" data-preset="pin-6">6位PIN</button>
+              </div>
+            </div>
+
+            <!-- 主口令输入 -->
+            <div class="input-group">
+              <div class="input-header">
+                <label class="input-label" for="input-mantra">主口令 (Master Mantra)</label>
+                <span class="canary-tag" id="tag-canary" title="金丝雀防手抖校验码">校验码: --</span>
+              </div>
+              <div class="input-with-action">
+                <input
+                  type="password"
+                  id="input-mantra"
+                  class="cyber-input"
+                  placeholder="输入您的唯一记忆口令..."
+                  autocomplete="off"
+                  value=""
+                />
+                <button type="button" class="btn-toggle-visibility" id="btn-toggle-pwd" title="点击显示明文">🙈</button>
+              </div>
+            </div>
+
+            <!-- 派生结果卡片 -->
+            <div class="derived-result-box">
+              <div class="derived-meta">
+                <span class="derived-label">计算派生密码</span>
+                <span class="derived-strength" id="text-rule-desc">字母+数字+特殊符号 (16位)</span>
+              </div>
+              <div class="derived-output-row">
+                <span class="derived-val" id="text-derived-pwd" style="color: #64748b; font-size: 13px;">等待输入主口令与目标站点...</span>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                  <button type="button" class="btn-save-rule" id="btn-save-rule" title="保存此规则与账号至多端清单">
+                    📌 记住账号规则
+                  </button>
+                  <button type="button" class="btn-copy-pwd" id="btn-copy-pwd" title="一键复制" disabled>
+                    📋 复制
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -1299,33 +1394,42 @@ if (document.readyState === "loading") {
   mountApp();
 }
 function setupPasswordGenerator() {
+  var _a;
   const inputMantra = document.getElementById("input-mantra");
-  const inputDomain2 = document.getElementById("input-domain");
+  const inputDomain = document.getElementById("input-domain");
+  const inputDomainAlias = document.getElementById("input-domain-alias");
+  const inputDomainUser = document.getElementById("input-domain-user");
   const btnTogglePwd = document.getElementById("btn-toggle-pwd");
   const tagCanary = document.getElementById("tag-canary");
   const textDerivedPwd = document.getElementById("text-derived-pwd");
-  const textRuleDesc2 = document.getElementById("text-rule-desc");
+  const textRuleDesc = document.getElementById("text-rule-desc");
   const btnCopyPwd = document.getElementById("btn-copy-pwd");
   const btnSaveRule = document.getElementById("btn-save-rule");
-  const presetSelector2 = document.getElementById("preset-selector");
+  const presetSelector = document.getElementById("preset-selector");
   const chipItems = document.querySelectorAll(".chip-item");
-  let currentPreset2 = "standard-16";
-  async function compute2() {
-    if (!inputMantra || !inputDomain2 || !textDerivedPwd) return;
-    const mantra = inputMantra.value || "";
-    const domain = inputDomain2.value || "";
+  let currentPreset = "standard-16";
+  (_a = document.getElementById("btn-scroll-to-create")) == null ? void 0 : _a.addEventListener("click", () => {
+    var _a2;
+    (_a2 = document.getElementById("card-generator")) == null ? void 0 : _a2.scrollIntoView({ behavior: "smooth" });
+    inputDomain == null ? void 0 : inputDomain.focus();
+  });
+  async function compute() {
+    if (!inputDomain || !textDerivedPwd) return;
+    const mantra = ((inputMantra == null ? void 0 : inputMantra.value) || getSessionMasterMantra() || "").trim();
+    const domain = (inputDomain.value || "").trim();
+    const user = ((inputDomainUser == null ? void 0 : inputDomainUser.value) || "").trim();
     if (tagCanary) {
-      if (mantra.trim()) {
+      if (mantra) {
         const canary = await computeCanary(mantra);
         tagCanary.textContent = `校验码: ${canary}`;
       } else {
         tagCanary.textContent = "校验码: --";
       }
     }
-    if (!mantra.trim() || !domain.trim()) {
-      if (!mantra.trim() && !domain.trim()) {
+    if (!mantra || !domain) {
+      if (!mantra && !domain) {
         textDerivedPwd.textContent = "等待输入主口令与目标站点...";
-      } else if (!mantra.trim()) {
+      } else if (!mantra) {
         textDerivedPwd.textContent = "等待输入主口令...";
       } else {
         textDerivedPwd.textContent = "等待输入目标标识...";
@@ -1335,7 +1439,7 @@ function setupPasswordGenerator() {
       return;
     }
     try {
-      const derived = await deriveSitePassword(mantra, domain, "", 1, currentPreset2);
+      const derived = await deriveSitePassword(mantra, domain, user, 1, currentPreset);
       textDerivedPwd.textContent = derived;
       textDerivedPwd.style.color = "#00f0ff";
       if (btnCopyPwd) btnCopyPwd.disabled = false;
@@ -1345,27 +1449,37 @@ function setupPasswordGenerator() {
       if (btnCopyPwd) btnCopyPwd.disabled = true;
     }
   }
-  inputMantra == null ? void 0 : inputMantra.addEventListener("input", compute2);
-  inputDomain2 == null ? void 0 : inputDomain2.addEventListener("input", () => {
-    const dVal = (inputDomain2.value || "").trim().toLowerCase();
+  inputMantra == null ? void 0 : inputMantra.addEventListener("input", () => {
+    if (inputMantra.value) {
+      setSessionMasterMantra(inputMantra.value);
+    }
+    compute();
+  });
+  inputDomainUser == null ? void 0 : inputDomainUser.addEventListener("input", compute);
+  inputDomainAlias == null ? void 0 : inputDomainAlias.addEventListener("input", compute);
+  inputDomain == null ? void 0 : inputDomain.addEventListener("input", () => {
+    const dVal = (inputDomain.value || "").trim().toLowerCase();
     const manifest = getLocalManifest();
     if (dVal && manifest.domains[dVal]) {
       const savedPreset = manifest.domains[dVal].rulePreset;
-      if (savedPreset && RULE_PRESETS[savedPreset] && savedPreset !== currentPreset2) {
-        currentPreset2 = savedPreset;
-        presetSelector2 == null ? void 0 : presetSelector2.querySelectorAll(".preset-btn").forEach((b) => {
+      if (savedPreset && RULE_PRESETS[savedPreset] && savedPreset !== currentPreset) {
+        currentPreset = savedPreset;
+        presetSelector == null ? void 0 : presetSelector.querySelectorAll(".preset-btn").forEach((b) => {
           if (b.getAttribute("data-preset") === savedPreset) {
             b.classList.add("active");
           } else {
             b.classList.remove("active");
           }
         });
-        if (textRuleDesc2) {
-          textRuleDesc2.textContent = RULE_PRESETS[savedPreset].description + " (已匹配保存规则)";
+        if (textRuleDesc) {
+          textRuleDesc.textContent = RULE_PRESETS[savedPreset].description + " (已匹配保存规则)";
         }
       }
+      if (manifest.domains[dVal].displayName && inputDomainAlias && !inputDomainAlias.value) {
+        inputDomainAlias.value = manifest.domains[dVal].displayName;
+      }
     }
-    compute2();
+    compute();
   });
   btnTogglePwd == null ? void 0 : btnTogglePwd.addEventListener("click", () => {
     if (!inputMantra) return;
@@ -1380,57 +1494,67 @@ function setupPasswordGenerator() {
     }
   });
   btnSaveRule == null ? void 0 : btnSaveRule.addEventListener("click", () => {
-    var _a;
-    const dVal = ((inputDomain2 == null ? void 0 : inputDomain2.value) || "").trim();
+    var _a2;
+    const dVal = ((inputDomain == null ? void 0 : inputDomain.value) || "").trim();
     if (!dVal) {
-      alert("请先输入目标站点或账号标识（例如 github.com）");
+      showToast("⚠️ 请先输入目标站点或服务域名（例如 github.com）");
+      inputDomain == null ? void 0 : inputDomain.focus();
       return;
     }
-    recordDomainRule(dVal, currentPreset2);
+    const aliasVal = ((inputDomainAlias == null ? void 0 : inputDomainAlias.value) || "").trim();
+    const userVal = ((inputDomainUser == null ? void 0 : inputDomainUser.value) || "").trim();
+    if (userVal) {
+      recordDomainAccount(dVal, userVal, 1, currentPreset, aliasVal);
+    } else {
+      recordDomainRule(dVal, currentPreset, aliasVal);
+    }
     btnSaveRule.textContent = "✅ 已记住！";
-    (_a = window.__refreshWebDAVRulesList) == null ? void 0 : _a.call(window);
+    (_a2 = window.__refreshWebDAVRulesList) == null ? void 0 : _a2.call(window);
+    showToast(`🎉 成功保存站点 [${aliasVal || dVal}] 规则！`);
     setTimeout(() => {
-      btnSaveRule.textContent = "📌 记住规则";
-    }, 1500);
+      var _a3;
+      btnSaveRule.textContent = "📌 记住账号规则";
+      (_a3 = document.getElementById("card-vault-list")) == null ? void 0 : _a3.scrollIntoView({ behavior: "smooth" });
+    }, 700);
   });
   chipItems.forEach((chip) => {
     chip.addEventListener("click", () => {
       const val = chip.getAttribute("data-val");
-      if (val && inputDomain2) {
-        inputDomain2.value = val;
+      if (val && inputDomain) {
+        inputDomain.value = val;
         const manifest = getLocalManifest();
         const dKey = val.toLowerCase();
         if (manifest.domains[dKey]) {
           const savedPreset = manifest.domains[dKey].rulePreset;
           if (savedPreset && RULE_PRESETS[savedPreset]) {
-            currentPreset2 = savedPreset;
-            presetSelector2 == null ? void 0 : presetSelector2.querySelectorAll(".preset-btn").forEach((b) => {
+            currentPreset = savedPreset;
+            presetSelector == null ? void 0 : presetSelector.querySelectorAll(".preset-btn").forEach((b) => {
               if (b.getAttribute("data-preset") === savedPreset) {
                 b.classList.add("active");
               } else {
                 b.classList.remove("active");
               }
             });
-            if (textRuleDesc2) {
-              textRuleDesc2.textContent = RULE_PRESETS[savedPreset].description + " (已匹配保存规则)";
+            if (textRuleDesc) {
+              textRuleDesc.textContent = RULE_PRESETS[savedPreset].description + " (已匹配保存规则)";
             }
           }
         }
-        compute2();
+        compute();
       }
     });
   });
-  presetSelector2 == null ? void 0 : presetSelector2.addEventListener("click", (e) => {
+  presetSelector == null ? void 0 : presetSelector.addEventListener("click", (e) => {
     const target = e.target;
     const preset = target.getAttribute("data-preset");
     if (preset && RULE_PRESETS[preset]) {
-      currentPreset2 = preset;
-      presetSelector2.querySelectorAll(".preset-btn").forEach((b) => b.classList.remove("active"));
+      currentPreset = preset;
+      presetSelector.querySelectorAll(".preset-btn").forEach((b) => b.classList.remove("active"));
       target.classList.add("active");
-      if (textRuleDesc2) {
-        textRuleDesc2.textContent = RULE_PRESETS[preset].description;
+      if (textRuleDesc) {
+        textRuleDesc.textContent = RULE_PRESETS[preset].description;
       }
-      compute2();
+      compute();
     }
   });
   btnCopyPwd == null ? void 0 : btnCopyPwd.addEventListener("click", async () => {
@@ -1450,7 +1574,7 @@ function setupPasswordGenerator() {
       alert("已派生密码: " + pwd);
     }
   });
-  compute2();
+  compute();
 }
 function setupWebDAVSync() {
   const btnToggleConfig = document.getElementById("btn-toggle-sync-config");
@@ -1470,7 +1594,7 @@ function setupWebDAVSync() {
   const syncedRulesList = document.getElementById("synced-rules-list");
   const arrowRules = document.getElementById("arrow-rules-list");
   const countRulesEl = document.getElementById("count-synced-rules");
-  const inputMantra = document.getElementById("input-mantra");
+  document.getElementById("input-mantra");
   function normalizeJianguoyunUrl(url) {
     const trimmed = (url || "").trim();
     if (/^https?:\/\/dav\.jianguoyun\.com\/dav\/?$/i.test(trimmed)) {
@@ -1539,7 +1663,7 @@ function setupWebDAVSync() {
     showToast("已刷新站点清单");
   });
   function renderRulesList() {
-    var _a;
+    var _a, _b;
     if (!syncedRulesList) return;
     const manifest = getLocalManifest();
     const allDomains = manifest.domains || {};
@@ -1581,11 +1705,18 @@ function setupWebDAVSync() {
             <span class="empty-icon">📂</span>
             <div class="empty-title">暂无已保存的站点与账号</div>
             <div class="empty-text">
-              1. 在上方输入目标站点计算后点击「📌 记住规则」加入清单；<br/>
-              2. 或在下方配置 WebDAV 一键双向同步即可同步全量密码库！
+              在下方录入新站点并点击「📌 记住账号规则」即可加入清单；<br/>
+              或配置 WebDAV 一键双向同步即可同步全量密码库！
             </div>
+            <button type="button" class="btn-quick-new-entry" id="btn-empty-create-site">➕ 立即录入新账号</button>
           </div>
         `;
+        (_b = document.getElementById("btn-empty-create-site")) == null ? void 0 : _b.addEventListener("click", () => {
+          var _a2;
+          (_a2 = document.getElementById("card-generator")) == null ? void 0 : _a2.scrollIntoView({ behavior: "smooth" });
+          const inpDom = document.getElementById("input-domain");
+          inpDom == null ? void 0 : inpDom.focus();
+        });
       }
       return;
     }
@@ -1612,17 +1743,32 @@ function setupWebDAVSync() {
                 <div class="acc-meta-left">
                   <span class="acc-user-badge">👤 ${acc.username}</span>
                   <span class="acc-ver-badge">v${acc.version || 1}</span>
+                  ${acc.serviceKey ? `<span class="acc-tag-badge">🏷️ ${acc.serviceKey}</span>` : ""}
                 </div>
                 <div class="acc-actions-right">
-                  <button type="button" class="btn-acc-action btn-load-to-panel" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-preset="${item.rulePreset}" title="载入到上方主面板计算">
+                  <button type="button" class="btn-acc-action btn-load-to-panel" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-preset="${item.rulePreset}" data-name="${item.displayName || ""}" title="载入到下方表单">
                     ⚡ 载入
                   </button>
-                  <button type="button" class="btn-acc-action btn-copy-site-pwd" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-title="${displayTitle}" title="直接计算并复制密码">
+                  <button type="button" class="btn-acc-action btn-copy-site-pwd" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-title="${displayTitle}" data-unlock="unlock-${accSafeId}" title="直接计算并复制密码">
                     📋 复制密码
                   </button>
-                  <button type="button" class="btn-acc-action btn-peek-site-pwd" data-target="peek-${accSafeId}" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" title="查看计算密码">
+                  <button type="button" class="btn-acc-action btn-peek-site-pwd" data-target="peek-${accSafeId}" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-unlock="unlock-${accSafeId}" title="查看计算密码">
                     👁️
                   </button>
+                </div>
+              </div>
+              <!-- 专属内联主口令现场解锁条 (会话未解锁时点击复制或查看就地展开) -->
+              <div class="vault-inline-unlock-row" id="unlock-${accSafeId}" style="display: none;">
+                <div class="unlock-header-tip">
+                  <span>🔑 输入主口令派生此记录</span>
+                  <span class="unlock-canary-badge" id="canary-unlock-${accSafeId}">校验码: --</span>
+                </div>
+                <div class="unlock-input-wrap">
+                  <input type="password" class="unlock-mantra-input cyber-input" id="input-unlock-${accSafeId}" placeholder="输入主口令..." autocomplete="off" />
+                  <button type="button" class="btn-toggle-unlock-pwd" data-input="input-unlock-${accSafeId}" title="显隐">🙈</button>
+                  <button type="button" class="btn-submit-unlock" data-input="input-unlock-${accSafeId}" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-target-peek="peek-${accSafeId}" data-unlock="unlock-${accSafeId}">派生查看</button>
+                  <button type="button" class="btn-submit-unlock-copy" data-input="input-unlock-${accSafeId}" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-title="${displayTitle}" data-unlock="unlock-${accSafeId}">派生复制</button>
+                  <button type="button" class="btn-cancel-unlock" data-unlock="unlock-${accSafeId}">✕</button>
                 </div>
               </div>
               <div class="vault-peek-pwd-bar" id="peek-${accSafeId}" style="display: none;">
@@ -1639,15 +1785,29 @@ function setupWebDAVSync() {
                 <span class="acc-user-badge default-key">默认凭据 (未指定账号)</span>
               </div>
               <div class="acc-actions-right">
-                <button type="button" class="btn-acc-action btn-load-to-panel" data-domain="${item.canonicalDomain}" data-user="" data-preset="${item.rulePreset}" title="载入到上方主面板计算">
+                <button type="button" class="btn-acc-action btn-load-to-panel" data-domain="${item.canonicalDomain}" data-user="" data-preset="${item.rulePreset}" data-name="${item.displayName || ""}" title="载入到下方表单">
                   ⚡ 载入
                 </button>
-                <button type="button" class="btn-acc-action btn-copy-site-pwd" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-title="${displayTitle}" title="直接计算并复制密码">
+                <button type="button" class="btn-acc-action btn-copy-site-pwd" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-title="${displayTitle}" data-unlock="unlock-${defaultSafeId}" title="直接计算并复制密码">
                   📋 复制密码
                 </button>
-                <button type="button" class="btn-acc-action btn-peek-site-pwd" data-target="peek-${defaultSafeId}" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" title="查看计算密码">
+                <button type="button" class="btn-acc-action btn-peek-site-pwd" data-target="peek-${defaultSafeId}" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-unlock="unlock-${defaultSafeId}" title="查看计算密码">
                   👁️
                 </button>
+              </div>
+            </div>
+            <!-- 专属内联主口令现场解锁条 (会话未解锁时点击复制或查看就地展开) -->
+            <div class="vault-inline-unlock-row" id="unlock-${defaultSafeId}" style="display: none;">
+              <div class="unlock-header-tip">
+                <span>🔑 输入主口令派生此记录</span>
+                <span class="unlock-canary-badge" id="canary-unlock-${defaultSafeId}">校验码: --</span>
+              </div>
+              <div class="unlock-input-wrap">
+                <input type="password" class="unlock-mantra-input cyber-input" id="input-unlock-${defaultSafeId}" placeholder="输入主口令..." autocomplete="off" />
+                <button type="button" class="btn-toggle-unlock-pwd" data-input="input-unlock-${defaultSafeId}" title="显隐">🙈</button>
+                <button type="button" class="btn-submit-unlock" data-input="input-unlock-${defaultSafeId}" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-target-peek="peek-${defaultSafeId}" data-unlock="unlock-${defaultSafeId}">派生查看</button>
+                <button type="button" class="btn-submit-unlock-copy" data-input="input-unlock-${defaultSafeId}" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-title="${displayTitle}" data-unlock="unlock-${defaultSafeId}">派生复制</button>
+                <button type="button" class="btn-cancel-unlock" data-unlock="unlock-${defaultSafeId}">✕</button>
               </div>
             </div>
             <div class="vault-peek-pwd-bar" id="peek-${defaultSafeId}" style="display: none;">
@@ -1660,15 +1820,23 @@ function setupWebDAVSync() {
           <div class="vault-site-card" data-domain="${item.canonicalDomain}">
             <div class="vault-site-header">
               <div class="vault-site-info">
-                <div class="vault-site-title-row">
-                  <span class="vault-site-name">${hasCustomAlias ? "🏷️ " : "🌐 "}${displayTitle}</span>
-                  <button type="button" class="btn-edit-alias-inline" data-domain="${item.canonicalDomain}" data-name="${item.displayName || ""}" title="修改站点别名/备注">✏️</button>
+                <div class="vault-site-title-row" id="title-row-${safeDomainId}">
+                  <span class="vault-site-name" id="name-label-${safeDomainId}">${hasCustomAlias ? "🏷️ " : "🌐 "}${displayTitle}</span>
+                  <button type="button" class="btn-edit-alias-inline" data-domain="${item.canonicalDomain}" data-name="${item.displayName || ""}" data-target="title-row-${safeDomainId}" title="修改站点别名/备注">✏️</button>
                 </div>
                 ${subDomainText ? `<span class="vault-site-sub">🌐 ${subDomainText}</span>` : ""}
               </div>
               <div class="vault-site-meta">
                 <span class="vault-preset-pill">${presetName}</span>
-                <button type="button" class="btn-del-site-rule" data-del="${item.canonicalDomain}" data-name="${displayTitle}" title="从清单移除">✕</button>
+                <button type="button" class="btn-del-site-rule" data-del="${item.canonicalDomain}" data-target="del-bar-${safeDomainId}" title="从清单移除">✕</button>
+              </div>
+            </div>
+            <!-- 删除二次确认条 (就地展开，免原生 confirm) -->
+            <div class="vault-del-confirm-bar" id="del-bar-${safeDomainId}" style="display: none;">
+              <span class="del-confirm-text">确定移除 [${displayTitle}] 吗？</span>
+              <div class="del-confirm-actions">
+                <button type="button" class="btn-confirm-del-btn btn-do-del" data-del="${item.canonicalDomain}" data-name="${displayTitle}">确认移除</button>
+                <button type="button" class="btn-confirm-del-btn btn-cancel-del" data-target="del-bar-${safeDomainId}">取消</button>
               </div>
             </div>
             <div class="vault-accounts-box">
@@ -1679,31 +1847,35 @@ function setupWebDAVSync() {
     }).join("");
     syncedRulesList.querySelectorAll(".btn-load-to-panel").forEach((btn) => {
       btn.addEventListener("click", (e) => {
-        var _a2, _b;
+        var _a2;
         e.stopPropagation();
         const dom = btn.getAttribute("data-domain") || "";
         const preset = btn.getAttribute("data-preset") || "standard-16";
-        if (inputDomain) {
-          inputDomain.value = dom;
-        }
+        const user = btn.getAttribute("data-user") || "";
+        const name = btn.getAttribute("data-name") || "";
+        const inpDomain = document.getElementById("input-domain");
+        const inpAlias = document.getElementById("input-domain-alias");
+        const inpUser = document.getElementById("input-domain-user");
+        const inpMantra = document.getElementById("input-mantra");
+        const presetSelector = document.getElementById("preset-selector");
+        const textRuleDesc = document.getElementById("text-rule-desc");
+        if (inpDomain) inpDomain.value = dom;
+        if (inpAlias) inpAlias.value = name;
+        if (inpUser) inpUser.value = user;
         if (RULE_PRESETS[preset]) {
-          currentPreset = preset;
           presetSelector == null ? void 0 : presetSelector.querySelectorAll(".preset-btn").forEach((b) => {
-            if (b.getAttribute("data-preset") === preset) {
-              b.classList.add("active");
-            } else {
-              b.classList.remove("active");
-            }
+            if (b.getAttribute("data-preset") === preset) b.classList.add("active");
+            else b.classList.remove("active");
           });
           if (textRuleDesc) {
             textRuleDesc.textContent = RULE_PRESETS[preset].description + " (已匹配站点规则)";
           }
         }
-        compute();
+        inpDomain == null ? void 0 : inpDomain.dispatchEvent(new Event("input", { bubbles: true }));
         (_a2 = document.getElementById("card-generator")) == null ? void 0 : _a2.scrollIntoView({ behavior: "smooth" });
-        if (!((_b = inputMantra == null ? void 0 : inputMantra.value) == null ? void 0 : _b.trim())) {
-          inputMantra == null ? void 0 : inputMantra.focus();
-          showToast(`已载入站点 [${dom}]，请输入主口令查看计算密码`);
+        if (!getSessionMasterMantra()) {
+          inpMantra == null ? void 0 : inpMantra.focus();
+          showToast(`已载入站点 [${dom}]，请输入主口令现场派生`);
         } else {
           showToast(`已载入站点 [${dom}]，密码已现场计算`);
         }
@@ -1711,18 +1883,22 @@ function setupWebDAVSync() {
     });
     syncedRulesList.querySelectorAll(".btn-copy-site-pwd").forEach((btn) => {
       btn.addEventListener("click", async (e) => {
-        var _a2, _b;
         e.stopPropagation();
-        const mantra = ((_a2 = inputMantra == null ? void 0 : inputMantra.value) == null ? void 0 : _a2.trim()) || "";
+        const mantra = getSessionMasterMantra();
+        const unlockId = btn.getAttribute("data-unlock") || "";
+        const unlockEl = unlockId ? document.getElementById(unlockId) : null;
         const dom = btn.getAttribute("data-domain") || "";
         const user = btn.getAttribute("data-user") || "";
         const ver = parseInt(btn.getAttribute("data-ver") || "1", 10);
         const preset = btn.getAttribute("data-preset") || "standard-16";
         const title = btn.getAttribute("data-title") || dom;
         if (!mantra) {
-          (_b = document.getElementById("card-generator")) == null ? void 0 : _b.scrollIntoView({ behavior: "smooth" });
-          inputMantra == null ? void 0 : inputMantra.focus();
-          showToast("💡 请先在上方输入您的主口令，即可一键复制密码");
+          if (unlockEl) {
+            unlockEl.style.display = unlockEl.style.display === "none" ? "flex" : "none";
+            const inp = unlockEl.querySelector(".unlock-mantra-input");
+            inp == null ? void 0 : inp.focus();
+          }
+          showToast("🔑 请输入主口令现场派生此记录");
           return;
         }
         try {
@@ -1744,9 +1920,10 @@ function setupWebDAVSync() {
     });
     syncedRulesList.querySelectorAll(".btn-peek-site-pwd").forEach((btn) => {
       btn.addEventListener("click", async (e) => {
-        var _a2, _b;
         e.stopPropagation();
-        const mantra = ((_a2 = inputMantra == null ? void 0 : inputMantra.value) == null ? void 0 : _a2.trim()) || "";
+        const mantra = getSessionMasterMantra();
+        const unlockId = btn.getAttribute("data-unlock") || "";
+        const unlockEl = unlockId ? document.getElementById(unlockId) : null;
         const dom = btn.getAttribute("data-domain") || "";
         const user = btn.getAttribute("data-user") || "";
         const ver = parseInt(btn.getAttribute("data-ver") || "1", 10);
@@ -1754,9 +1931,12 @@ function setupWebDAVSync() {
         const targetId = btn.getAttribute("data-target") || "";
         const targetEl = document.getElementById(targetId);
         if (!mantra) {
-          (_b = document.getElementById("card-generator")) == null ? void 0 : _b.scrollIntoView({ behavior: "smooth" });
-          inputMantra == null ? void 0 : inputMantra.focus();
-          showToast("💡 请先在上方输入您的主口令，即可查看密码");
+          if (unlockEl) {
+            unlockEl.style.display = unlockEl.style.display === "none" ? "flex" : "none";
+            const inp = unlockEl.querySelector(".unlock-mantra-input");
+            inp == null ? void 0 : inp.focus();
+          }
+          showToast("🔑 请输入主口令现场派生此记录");
           return;
         }
         if (!targetEl) return;
@@ -1788,34 +1968,172 @@ function setupWebDAVSync() {
         }
       });
     });
+    syncedRulesList.querySelectorAll(".vault-inline-unlock-row").forEach((row) => {
+      const inpMantra = row.querySelector(".unlock-mantra-input");
+      const canaryBadge = row.querySelector(".unlock-canary-badge");
+      const btnToggle = row.querySelector(".btn-toggle-unlock-pwd");
+      const btnUnlockPeek = row.querySelector(".btn-submit-unlock");
+      const btnUnlockCopy = row.querySelector(".btn-submit-unlock-copy");
+      const btnCancel = row.querySelector(".btn-cancel-unlock");
+      inpMantra == null ? void 0 : inpMantra.addEventListener("input", async () => {
+        const val = (inpMantra.value || "").trim();
+        if (canaryBadge) {
+          if (val) {
+            const canary = await computeCanary(val);
+            canaryBadge.textContent = `校验码: ${canary}`;
+          } else {
+            canaryBadge.textContent = "校验码: --";
+          }
+        }
+      });
+      btnToggle == null ? void 0 : btnToggle.addEventListener("click", () => {
+        if (!inpMantra) return;
+        const isPwd = inpMantra.type === "password";
+        inpMantra.type = isPwd ? "text" : "password";
+        btnToggle.textContent = isPwd ? "👁️" : "🙈";
+      });
+      btnCancel == null ? void 0 : btnCancel.addEventListener("click", () => {
+        row.style.display = "none";
+      });
+      btnUnlockPeek == null ? void 0 : btnUnlockPeek.addEventListener("click", async () => {
+        const val = ((inpMantra == null ? void 0 : inpMantra.value) || "").trim();
+        if (!val) {
+          showToast("⚠️ 请先输入您的主口令");
+          inpMantra == null ? void 0 : inpMantra.focus();
+          return;
+        }
+        setSessionMasterMantra(val);
+        row.style.display = "none";
+        const dom = btnUnlockPeek.getAttribute("data-domain") || "";
+        const user = btnUnlockPeek.getAttribute("data-user") || "";
+        const ver = parseInt(btnUnlockPeek.getAttribute("data-ver") || "1", 10);
+        const preset = btnUnlockPeek.getAttribute("data-preset") || "standard-16";
+        const targetPeekId = btnUnlockPeek.getAttribute("data-target-peek") || "";
+        const targetEl = document.getElementById(targetPeekId);
+        if (!targetEl) return;
+        try {
+          const pwd = await deriveSitePassword(val, dom, user, ver, preset);
+          const valEl = targetEl.querySelector(".peek-pwd-val");
+          if (valEl) valEl.textContent = pwd;
+          targetEl.style.display = "flex";
+          let leftSec = 5;
+          const timerEl = targetEl.querySelector(".peek-pwd-timer");
+          const interval = setInterval(() => {
+            leftSec--;
+            if (timerEl) timerEl.textContent = `${leftSec}秒后自动隐蔽`;
+            if (leftSec <= 0) {
+              clearInterval(interval);
+              targetEl.style.display = "none";
+              if (valEl) valEl.textContent = "••••••••••••••••";
+            }
+          }, 1e3);
+          showToast("✅ 会话已解锁，密码已现场派生！");
+        } catch (err) {
+          showToast(`❌ 密码派生异常: ${(err == null ? void 0 : err.message) || "未知错误"}`);
+        }
+      });
+      btnUnlockCopy == null ? void 0 : btnUnlockCopy.addEventListener("click", async () => {
+        const val = ((inpMantra == null ? void 0 : inpMantra.value) || "").trim();
+        if (!val) {
+          showToast("⚠️ 请先输入您的主口令");
+          inpMantra == null ? void 0 : inpMantra.focus();
+          return;
+        }
+        setSessionMasterMantra(val);
+        row.style.display = "none";
+        const dom = btnUnlockCopy.getAttribute("data-domain") || "";
+        const user = btnUnlockCopy.getAttribute("data-user") || "";
+        const ver = parseInt(btnUnlockCopy.getAttribute("data-ver") || "1", 10);
+        const preset = btnUnlockCopy.getAttribute("data-preset") || "standard-16";
+        const title = btnUnlockCopy.getAttribute("data-title") || dom;
+        try {
+          const pwd = await deriveSitePassword(val, dom, user, ver, preset);
+          await navigator.clipboard.writeText(pwd);
+          showToast(`🎉 已成功派生并复制 [${title}${user ? ` - ${user}` : ""}] 的密码！`);
+        } catch (err) {
+          showToast(`❌ 密码派生异常: ${(err == null ? void 0 : err.message) || "未知错误"}`);
+        }
+      });
+    });
     syncedRulesList.querySelectorAll(".btn-edit-alias-inline").forEach((btn) => {
       btn.addEventListener("click", (e) => {
+        var _a2, _b2, _c, _d;
         e.stopPropagation();
         const d = btn.getAttribute("data-domain") || "";
         const curName = btn.getAttribute("data-name") || "";
-        const newAlias = window.prompt(`为站点 [${d}] 设置别名/备注名称:`, curName);
-        if (newAlias !== null) {
+        const targetRowId = btn.getAttribute("data-target") || "";
+        const targetRow = document.getElementById(targetRowId);
+        if (!targetRow) return;
+        targetRow.innerHTML = `
+          <div class="inline-alias-editor">
+            <input type="text" class="inline-alias-input cyber-input" id="alias-edit-${d}" value="${curName}" placeholder="设置别名 (如: 三毛专线)" autocomplete="off" />
+            <button type="button" class="btn-save-inline-alias" id="btn-save-alias-${d}">保存</button>
+            <button type="button" class="btn-cancel-inline-alias" id="btn-cancel-alias-${d}">取消</button>
+          </div>
+        `;
+        const editInput = document.getElementById(`alias-edit-${d}`);
+        const btnSave2 = (_b2 = (_a2 = document.getElementById(`alias-edit-${d}`)) == null ? void 0 : _a2.parentElement) == null ? void 0 : _b2.querySelector(".btn-save-inline-alias");
+        const btnCancel = (_d = (_c = document.getElementById(`alias-edit-${d}`)) == null ? void 0 : _c.parentElement) == null ? void 0 : _d.querySelector(".btn-cancel-inline-alias");
+        editInput == null ? void 0 : editInput.focus();
+        editInput == null ? void 0 : editInput.select();
+        const saveHandler = () => {
+          const newAlias = ((editInput == null ? void 0 : editInput.value) || "").trim();
           const item = manifest.domains[d];
           if (item) {
-            recordDomainRule(d, item.rulePreset, newAlias.trim());
+            recordDomainRule(d, item.rulePreset, newAlias);
             renderRulesList();
             refreshStatusView();
             showToast(`✅ 已更新站点 [${d}] 的别名`);
           }
-        }
+        };
+        btnSave2 == null ? void 0 : btnSave2.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          saveHandler();
+        });
+        btnCancel == null ? void 0 : btnCancel.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          renderRulesList();
+        });
+        editInput == null ? void 0 : editInput.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") {
+            ev.preventDefault();
+            saveHandler();
+          } else if (ev.key === "Escape") {
+            ev.preventDefault();
+            renderRulesList();
+          }
+        });
       });
     });
     syncedRulesList.querySelectorAll(".btn-del-site-rule").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
+        const targetBarId = btn.getAttribute("data-target") || "";
+        const targetBar = document.getElementById(targetBarId);
+        if (targetBar) {
+          targetBar.style.display = targetBar.style.display === "none" ? "flex" : "none";
+        }
+      });
+    });
+    syncedRulesList.querySelectorAll(".btn-do-del").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
         const delDomain = btn.getAttribute("data-del");
         const siteName = btn.getAttribute("data-name") || delDomain;
-        if (delDomain && window.confirm(`确定要从清单中移除站点 [${siteName}] 吗？`)) {
+        if (delDomain) {
           removeDomainRule(delDomain);
           renderRulesList();
           refreshStatusView();
           showToast(`已移除站点 [${siteName}]`);
         }
+      });
+    });
+    syncedRulesList.querySelectorAll(".btn-cancel-del").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const targetBarId = btn.getAttribute("data-target") || "";
+        const targetBar = document.getElementById(targetBarId);
+        if (targetBar) targetBar.style.display = "none";
       });
     });
   }
