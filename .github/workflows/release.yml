@@ -295,26 +295,46 @@ jobs:
 
       - name: Sync CI Hashes to public/version.json
         run: |
+          git fetch origin main
+          git checkout -B main origin/main
           python -c "
-          import json
+          import json, os
           with open('public/version.json', 'r', encoding='utf-8') as f:
               v = json.load(f)
+          tag = os.environ.get('TAG', '')
+          if tag and v.get('versionTag') != tag and v.get('version') != tag.lstrip('v'):
+              print('Skip sync: main version.json is at', v.get('versionTag'), '!=', tag)
+              raise SystemExit(0)
+          def fmt_size(b):
+              if b >= 1024 * 1024:
+                  return f'{b / (1024 * 1024):.2f} MB'
+              elif b >= 1024:
+                  return f'{b / 1024:.1f} KB'
+              return f'{b} B'
           with open('release-assets/SHA256SUMS.txt', 'r', encoding='utf-8') as f:
               for line in f:
                   parts = line.strip().split()
                   if len(parts) >= 2:
-                      h, name = parts[0], parts[1]
+                      h, name = parts[0].lower(), parts[1]
+                      fp = os.path.join('release-assets', name)
+                      sz = os.path.getsize(fp) if os.path.exists(fp) else None
                       if 'artifacts' in v and name in v['artifacts']:
                           v['artifacts'][name]['sha256'] = h
-                      if 'release.apk' in name:
+                          if sz is not None:
+                              v['artifacts'][name]['size'] = sz
+                              v['artifacts'][name]['sizeText'] = fmt_size(sz)
+                      if name.endswith('-release.apk'):
                           v['releaseSha256'] = h
-                      elif 'debug.apk' in name:
+                      elif name.endswith('-debug.apk'):
                           v['debugSha256'] = h
           with open('public/version.json', 'w', encoding='utf-8') as f:
               json.dump(v, f, indent=4, ensure_ascii=False)
           "
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add public/version.json
-          git commit -m "chore(release): sync release assets sha256 to version.json [skip ci]" || true
-          git push origin main || true
+          if ! git diff --quiet public/version.json; then
+            git add public/version.json
+            git commit -m "chore(release): sync release assets sha256 to version.json [skip ci]"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
