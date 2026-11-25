@@ -478,10 +478,13 @@ function mountApp() {
               <div class="release-title" id="text-release-title"></div>
               <div class="release-notes" id="text-release-notes"></div>
               <div class="download-progress-row" id="download-progress-row" style="display: none;">
+                <div class="download-meta-row">
+                  <span class="download-channel-badge" id="update-download-channel" style="display: none;">🌐 节点准备中</span>
+                  <span class="progress-text" id="update-progress-text">0%</span>
+                </div>
                 <div class="progress-bar-bg">
                   <div class="progress-bar-fill" id="update-progress-fill" style="width: 0%;"></div>
                 </div>
-                <div class="progress-text" id="update-progress-text">0%</div>
               </div>
               <button type="button" class="btn-update-action" id="btn-action-update">
                 ⚡ 立即下载并安装新版本
@@ -1720,6 +1723,8 @@ function setupUpdateChecker() {
 
   let latestRelease: VersionMetadata | null = null;
 
+  let isUpdateDownloading = false;
+
   async function check() {
     if (!textLatest || !badgeStatus) return;
     textLatest.textContent = '检查中...';
@@ -1741,6 +1746,9 @@ function setupUpdateChecker() {
           textTitle.textContent = `${latestRelease.title} (${latestRelease.assetSizeText})`;
           textNotes.textContent = latestRelease.changelog;
         }
+        if (btnAction && !isUpdateDownloading) {
+          btnAction.style.display = 'block';
+        }
       } else {
         badgeStatus.textContent = '已是最新';
         badgeStatus.className = 'update-status latest';
@@ -1761,6 +1769,25 @@ function setupUpdateChecker() {
     const downloadUrl = latestRelease.downloadUrl;
 
     if (typeof window !== 'undefined' && (window as any).MantraNative?.downloadAndInstallApk) {
+      isUpdateDownloading = true;
+      btnAction.style.display = 'none';
+      if (btnCheck) btnCheck.style.display = 'none';
+
+      const progressRow = document.getElementById('download-progress-row');
+      const progressText = document.getElementById('update-progress-text');
+      const channelEl = document.getElementById('update-download-channel');
+      if (progressRow) progressRow.style.display = 'flex';
+      if (progressText) progressText.textContent = '0% (正在连接更新节点...)';
+      if (channelEl) {
+        try {
+          const host = new URL(downloadUrl).host;
+          channelEl.textContent = `🌐 渠道: ${host}`;
+          channelEl.style.display = 'inline-block';
+        } catch {
+          channelEl.style.display = 'none';
+        }
+      }
+
       (window as any).MantraNative.downloadAndInstallApk(downloadUrl, latestRelease.versionTag, latestRelease.sha256);
       return;
     }
@@ -1773,6 +1800,38 @@ function setupUpdateChecker() {
       const progressRow = document.getElementById('download-progress-row');
       const progressFill = document.getElementById('update-progress-fill');
       const progressText = document.getElementById('update-progress-text');
+      const channelEl = document.getElementById('update-download-channel');
+      const btnActionEl = document.getElementById('btn-action-update') as HTMLButtonElement | null;
+      const btnCheckEl = document.getElementById('btn-check-update') as HTMLButtonElement | null;
+
+      const status = data?.status || 'downloading';
+      const isActive = status === 'downloading' || status === 'installing' || status === 'permission_required';
+      isUpdateDownloading = isActive;
+
+      // 下载/校验/安装过程中隐藏下载按钮与检查按钮；失败或取消后重新显示
+      if (btnActionEl) {
+        if (isActive) {
+          btnActionEl.style.display = 'none';
+        } else if (status === 'error') {
+          btnActionEl.style.display = 'block';
+          btnActionEl.textContent = '🔄 重试下载并安装';
+        } else if (status === 'cancelled') {
+          btnActionEl.style.display = 'block';
+          btnActionEl.textContent = '⚡ 立即下载并安装新版本';
+        } else if (status === 'completed') {
+          btnActionEl.style.display = 'block';
+          btnActionEl.textContent = '⚡ 重新调起安装';
+        }
+      }
+      if (btnCheckEl) {
+        btnCheckEl.style.display = isActive ? 'none' : 'block';
+      }
+
+      // 展示当前实际选用的下载渠道
+      if (channelEl && data?.channel) {
+        channelEl.textContent = `🌐 渠道: ${data.channel}`;
+        channelEl.style.display = 'inline-block';
+      }
 
       if (progressRow && progressFill && progressText) {
         progressRow.style.display = 'flex';

@@ -131,6 +131,30 @@ class MainActivity : AppCompatActivity() {
         @Volatile
         private var lastMessage: String = ""
 
+        @Volatile
+        private var lastChannel: String = ""
+
+        /**
+         * 将候选下载 URL 格式化为直观易读的渠道标签
+         */
+        @JvmStatic
+        fun formatDownloadChannel(url: String?): String {
+            if (url.isNullOrBlank()) return "未知渠道"
+            return when {
+                url.contains("ghproxy.net") -> "ghproxy.net 加速镜像"
+                url.contains("gh-proxy.com") -> "gh-proxy.com 加速镜像"
+                url.contains("mirror.ghproxy.com") -> "mirror.ghproxy.com 加速镜像"
+                url.contains("github.com") -> "GitHub 官方直连"
+                url.contains("trycloudflare.com") || url.contains("cpolar") -> "内网穿透直连通道"
+                url.contains("192.168.") || url.contains("10.") || url.contains("127.0.0.1") -> "开发机局域网直连"
+                else -> try {
+                    URL(url).host.ifBlank { "云端高速节点" }
+                } catch (_: Exception) {
+                    "云端节点"
+                }
+            }
+        }
+
         /**
          * 计算本地文件的 SHA-256 校验和 (小写 64 位十六进制)
          */
@@ -426,6 +450,7 @@ class MainActivity : AppCompatActivity() {
                     lastPercent = 100
                     lastReceived = targetFile.length()
                     lastTotal = targetFile.length()
+                    lastChannel = "本地安装包缓存"
                     lastMessage = "已检测到完整安装包（SHA-256 校验通过），正在调起安装..."
                     notifyJsUpdateStatus("installing", 100, targetFile.length(), targetFile.length(), lastMessage)
                     runOnUiThread { triggerApkInstall(targetFile) }
@@ -446,6 +471,7 @@ class MainActivity : AppCompatActivity() {
             lastPercent = 0
             lastReceived = 0
             lastTotal = 0
+            lastChannel = "节点探测中..."
             lastMessage = "正在连接更新节点..."
             notifyJsUpdateStatus("downloading", 0, 0, 0, "正在连接更新节点...")
 
@@ -489,11 +515,15 @@ class MainActivity : AppCompatActivity() {
 
                     for ((idx, candidate) in uniqueCandidates.withIndex()) {
                         if (!isDownloading.get()) return@Thread
-                        if (idx > 0) {
-                            val msg = "正在自动切换备用加速节点 (${idx + 1}/${uniqueCandidates.size})..."
-                            lastMessage = msg
-                            notifyJsUpdateStatus("downloading", lastPercent, lastReceived, lastTotal, msg)
+                        val channelLabel = formatDownloadChannel(candidate)
+                        lastChannel = channelLabel
+                        val probeMsg = if (idx == 0) {
+                            "正在连接 ($channelLabel)..."
+                        } else {
+                            "正在切换备用节点 (${idx + 1}/${uniqueCandidates.size})..."
                         }
+                        lastMessage = probeMsg
+                        notifyJsUpdateStatus("downloading", lastPercent, lastReceived, lastTotal, probeMsg)
 
                         try {
                             var currentUrl = URL(candidate)
@@ -551,7 +581,10 @@ class MainActivity : AppCompatActivity() {
                                 connection = conn
                                 isRange = (responseCode == 206)
                                 connected = true
-                                Log.i(TAG, "已成功连通更新节点: $candidate (HTTP $responseCode)")
+                                lastChannel = channelLabel
+                                lastMessage = "已连通，准备接收数据..."
+                                notifyJsUpdateStatus("downloading", lastPercent, lastReceived, lastTotal, lastMessage)
+                                Log.i(TAG, "已成功连通更新节点: $candidate ($channelLabel, HTTP $responseCode)")
                                 break
                             } else {
                                 conn.disconnect()
@@ -1016,10 +1049,17 @@ class MainActivity : AppCompatActivity() {
     ) {
         runOnUiThread {
             if (::webView.isInitialized) {
-                val cleanMsg = msg?.replace("\"", "\\\"")?.replace("\n", " ")?.replace("\r", " ") ?: ""
+                val payloadJson = org.json.JSONObject().apply {
+                    put("status", status)
+                    put("percent", percent)
+                    put("receivedBytes", received)
+                    put("totalBytes", total)
+                    put("message", msg ?: "")
+                    put("channel", lastChannel)
+                }.toString()
                 val js = """
                     (function() {
-                        var payload = { status: '$status', percent: $percent, receivedBytes: $received, totalBytes: $total, message: '$cleanMsg' };
+                        var payload = $payloadJson;
                         if (window.onMantraDownloadProgress) { window.onMantraDownloadProgress(payload); }
                         if (window.onAlpineDownloadProgress) { window.onAlpineDownloadProgress(payload); }
                     })();

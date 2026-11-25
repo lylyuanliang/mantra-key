@@ -109,7 +109,7 @@ const __vitePreload = function preload(baseModule, deps, importerUrl) {
   });
 };
 const acceleratorPrefix = "https://ghproxy.net/";
-const version = "0.1.1.202611251050";
+const version = "0.1.2.202611251600";
 const defaultConfig = {
   acceleratorPrefix,
   version
@@ -1297,10 +1297,13 @@ function mountApp() {
               <div class="release-title" id="text-release-title"></div>
               <div class="release-notes" id="text-release-notes"></div>
               <div class="download-progress-row" id="download-progress-row" style="display: none;">
+                <div class="download-meta-row">
+                  <span class="download-channel-badge" id="update-download-channel" style="display: none;">🌐 节点准备中</span>
+                  <span class="progress-text" id="update-progress-text">0%</span>
+                </div>
                 <div class="progress-bar-bg">
                   <div class="progress-bar-fill" id="update-progress-fill" style="width: 0%;"></div>
                 </div>
-                <div class="progress-text" id="update-progress-text">0%</div>
               </div>
               <button type="button" class="btn-update-action" id="btn-action-update">
                 ⚡ 立即下载并安装新版本
@@ -2374,6 +2377,7 @@ function setupUpdateChecker() {
   const textNotes = document.getElementById("text-release-notes");
   const btnAction = document.getElementById("btn-action-update");
   let latestRelease = null;
+  let isUpdateDownloading = false;
   async function check() {
     if (!textLatest || !badgeStatus) return;
     textLatest.textContent = "检查中...";
@@ -2391,6 +2395,9 @@ function setupUpdateChecker() {
           detailBox.style.display = "flex";
           textTitle.textContent = `${latestRelease.title} (${latestRelease.assetSizeText})`;
           textNotes.textContent = latestRelease.changelog;
+        }
+        if (btnAction && !isUpdateDownloading) {
+          btnAction.style.display = "block";
         }
       } else {
         badgeStatus.textContent = "已是最新";
@@ -2410,6 +2417,23 @@ function setupUpdateChecker() {
     if (!latestRelease) return;
     const downloadUrl = latestRelease.downloadUrl;
     if (typeof window !== "undefined" && ((_a = window.MantraNative) == null ? void 0 : _a.downloadAndInstallApk)) {
+      isUpdateDownloading = true;
+      btnAction.style.display = "none";
+      if (btnCheck) btnCheck.style.display = "none";
+      const progressRow = document.getElementById("download-progress-row");
+      const progressText = document.getElementById("update-progress-text");
+      const channelEl = document.getElementById("update-download-channel");
+      if (progressRow) progressRow.style.display = "flex";
+      if (progressText) progressText.textContent = "0% (正在连接更新节点...)";
+      if (channelEl) {
+        try {
+          const host = new URL(downloadUrl).host;
+          channelEl.textContent = `🌐 渠道: ${host}`;
+          channelEl.style.display = "inline-block";
+        } catch {
+          channelEl.style.display = "none";
+        }
+      }
       window.MantraNative.downloadAndInstallApk(downloadUrl, latestRelease.versionTag, latestRelease.sha256);
       return;
     }
@@ -2420,6 +2444,33 @@ function setupUpdateChecker() {
       const progressRow = document.getElementById("download-progress-row");
       const progressFill = document.getElementById("update-progress-fill");
       const progressText = document.getElementById("update-progress-text");
+      const channelEl = document.getElementById("update-download-channel");
+      const btnActionEl = document.getElementById("btn-action-update");
+      const btnCheckEl = document.getElementById("btn-check-update");
+      const status = (data == null ? void 0 : data.status) || "downloading";
+      const isActive = status === "downloading" || status === "installing" || status === "permission_required";
+      isUpdateDownloading = isActive;
+      if (btnActionEl) {
+        if (isActive) {
+          btnActionEl.style.display = "none";
+        } else if (status === "error") {
+          btnActionEl.style.display = "block";
+          btnActionEl.textContent = "🔄 重试下载并安装";
+        } else if (status === "cancelled") {
+          btnActionEl.style.display = "block";
+          btnActionEl.textContent = "⚡ 立即下载并安装新版本";
+        } else if (status === "completed") {
+          btnActionEl.style.display = "block";
+          btnActionEl.textContent = "⚡ 重新调起安装";
+        }
+      }
+      if (btnCheckEl) {
+        btnCheckEl.style.display = isActive ? "none" : "block";
+      }
+      if (channelEl && (data == null ? void 0 : data.channel)) {
+        channelEl.textContent = `🌐 渠道: ${data.channel}`;
+        channelEl.style.display = "inline-block";
+      }
       if (progressRow && progressFill && progressText) {
         progressRow.style.display = "flex";
         const pct = Math.max(0, Math.min(100, data.percent || 0));
