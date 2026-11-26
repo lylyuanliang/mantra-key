@@ -109,7 +109,7 @@ const __vitePreload = function preload(baseModule, deps, importerUrl) {
   });
 };
 const acceleratorPrefix = "https://ghproxy.net/";
-const version = "0.1.2.202611251600";
+const version = "0.1.3.202611261647";
 const defaultConfig = {
   acceleratorPrefix,
   version
@@ -2359,13 +2359,9 @@ function setupServiceButtons() {
   refreshStatus();
 }
 function checkFirstLaunchGuide() {
-  const native = typeof window !== "undefined" ? window.MantraNative : null;
-  const isFirst = (native == null ? void 0 : native.isFirstLaunch) ? native.isFirstLaunch() : !localStorage.getItem("mk_onboarding_guided");
-  if (isFirst && !localStorage.getItem("mk_onboarding_guided")) {
-    setTimeout(() => {
-      const overlay = document.getElementById("onboarding-overlay");
-      if (overlay) overlay.style.display = "flex";
-    }, 600);
+  const overlay = document.getElementById("onboarding-overlay");
+  if (overlay) {
+    overlay.style.display = "none";
   }
 }
 function setupUpdateChecker() {

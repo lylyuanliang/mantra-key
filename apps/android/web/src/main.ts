@@ -1696,16 +1696,11 @@ function setupServiceButtons() {
   refreshStatus();
 }
 
-// 首次启动引导逻辑
+// 首次启动引导逻辑（按用户反馈要求暂时关闭启动自动弹窗，保留手动点击「开启指引说明」入口）
 function checkFirstLaunchGuide() {
-  const native = typeof window !== 'undefined' ? (window as any).MantraNative : null;
-  const isFirst = native?.isFirstLaunch ? native.isFirstLaunch() : !localStorage.getItem('mk_onboarding_guided');
-
-  if (isFirst && !localStorage.getItem('mk_onboarding_guided')) {
-    setTimeout(() => {
-      const overlay = document.getElementById('onboarding-overlay');
-      if (overlay) overlay.style.display = 'flex';
-    }, 600);
+  const overlay = document.getElementById('onboarding-overlay');
+  if (overlay) {
+    overlay.style.display = 'none';
   }
 }
 
