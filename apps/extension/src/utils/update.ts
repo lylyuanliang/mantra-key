@@ -73,8 +73,150 @@ export async function performExtensionAutoUpdate(
   };
 }
 
+export interface CachedExtensionUpdate {
+  info: ExtensionUpdateInfo;
+  checkedAt: number;
+}
+
 export const GITHUB_REPO = 'lylyuanliang/mantra-key';
 export const ACCELERATOR_PREFIX = 'https://ghproxy.net/';
+export const UPDATE_CACHE_STORAGE_KEY = 'mantrakey_extension_update_cache';
+export const UPDATE_CACHE_TTL_MS = 10 * 60 * 1000;
+const REQUEST_TIMEOUT_MS = 3500;
+
+/**
+ * 获取当前运行扩展的完整版本号（优先取带构建时间戳的 version_name）
+ */
+export function getCurrentExtensionVersion(): string {
+  const manifest = chrome.runtime?.getManifest?.();
+  return ((manifest as any)?.version_name || manifest?.version || '0.1.3.202611261647').trim();
+}
+
+/**
+ * 同步更新扩展图标右上角角标（有更新显示 NEW，无更新清空）
+ */
+export async function syncExtensionBadge(hasUpdate: boolean): Promise<void> {
+  if (!chrome.action?.setBadgeText) return;
+  try {
+    await chrome.action.setBadgeText({ text: hasUpdate ? 'NEW' : '' });
+    if (hasUpdate && chrome.action.setBadgeBackgroundColor) {
+      await chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
+    }
+  } catch {
+    // 忽略非扩展上下文或测试环境下的角标设置异常
+  }
+}
+
+/**
+ * 查询扩展图标当前是否正显示 NEW 更新角标
+ */
+export async function hasNewUpdateBadge(): Promise<boolean> {
+  if (!chrome.action?.getBadgeText) return false;
+  try {
+    const text = await chrome.action.getBadgeText({});
+    return (text || '').trim().toUpperCase() === 'NEW';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 读取本地缓存的扩展更新检测结果（版本已变更或数据无效时自动失效）
+ */
+export async function getCachedExtensionUpdate(): Promise<CachedExtensionUpdate | null> {
+  if (!chrome.storage?.local?.get) return null;
+  try {
+    const stored = await chrome.storage.local.get(UPDATE_CACHE_STORAGE_KEY);
+    const cached = stored?.[UPDATE_CACHE_STORAGE_KEY] as CachedExtensionUpdate | undefined;
+    if (!cached?.info?.latestVersion || typeof cached.checkedAt !== 'number') {
+      return null;
+    }
+
+    const currentVersion = getCurrentExtensionVersion();
+    // 扩展已升级或降级后，旧版本上下文下的缓存自动失效
+    if (cached.info.currentVersion !== currentVersion) {
+      return null;
+    }
+
+    const hasUpdate = compareVersions(currentVersion, cached.info.latestVersion) > 0;
+    return {
+      info: {
+        ...cached.info,
+        currentVersion,
+        hasUpdate,
+      },
+      checkedAt: cached.checkedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 将扩展更新检测结果写入本地缓存，供 Popup 打开时毫秒级直出
+ */
+export async function saveCachedExtensionUpdate(info: ExtensionUpdateInfo): Promise<void> {
+  if (!chrome.storage?.local?.set) return;
+  try {
+    const payload: CachedExtensionUpdate = {
+      info,
+      checkedAt: Date.now(),
+    };
+    await chrome.storage.local.set({ [UPDATE_CACHE_STORAGE_KEY]: payload });
+  } catch {
+    // 忽略存储写入异常
+  }
+}
+
+/**
+ * 判断更新缓存是否已过期，需要后台静默刷新
+ */
+export function isUpdateCacheStale(
+  cached: CachedExtensionUpdate | null,
+  ttlMs: number = UPDATE_CACHE_TTL_MS
+): boolean {
+  if (!cached) return true;
+  return Date.now() - cached.checkedAt >= ttlMs;
+}
+
+/**
+ * 并发竞速请求多个版本元数据地址，采纳首个返回有效版本 JSON 的节点并中止其余在途请求
+ */
+async function fetchFirstValidVersionJson(urls: string[]): Promise<any | null> {
+  if (urls.length === 0) return null;
+
+  const controllers = urls.map(() => new AbortController());
+  const timers = controllers.map((controller) =>
+    setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  );
+
+  try {
+    const tasks = urls.map(async (url, idx) => {
+      try {
+        const res = await fetch(url, { signal: controllers[idx].signal });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const json = await res.json();
+        if (!json || (!json.version && !json.versionTag)) {
+          throw new Error('Invalid version payload');
+        }
+        controllers.forEach((ctrl, i) => {
+          if (i !== idx) ctrl.abort();
+        });
+        return json;
+      } finally {
+        clearTimeout(timers[idx]);
+      }
+    });
+
+    return await Promise.any(tasks);
+  } catch {
+    return null;
+  } finally {
+    timers.forEach((timer) => clearTimeout(timer));
+  }
+}
 
 /**
  * 语义化版本号对比
@@ -97,11 +239,10 @@ export function compareVersions(current: string, latest: string): number {
 }
 
 /**
- * 获取最新版本元数据并比对当前插件版本
+ * 并发获取最新版本元数据并比对当前插件版本，同时自动同步本地缓存与图标角标
  */
 export async function checkExtensionUpdate(): Promise<ExtensionUpdateInfo | null> {
-  const manifest = chrome.runtime?.getManifest?.();
-  const currentVersion = ((manifest as any)?.version_name || manifest?.version || '0.1.1.202611231846').trim();
+  const currentVersion = getCurrentExtensionVersion();
   const timestamp = Date.now();
 
   const candidateUrls = [
@@ -111,25 +252,7 @@ export async function checkExtensionUpdate(): Promise<ExtensionUpdateInfo | null
     `https://cdn.jsdelivr.net/gh/${GITHUB_REPO}@main/public/version.json?t=${timestamp}`
   ];
 
-  let remoteData: any = null;
-  for (const url of candidateUrls) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 3500);
-      const res = await fetch(url, { signal: controller.signal });
-      clearTimeout(timer);
-      if (res.ok) {
-        const json = await res.json();
-        if (json && (json.version || json.versionTag)) {
-          remoteData = json;
-          break;
-        }
-      }
-    } catch {
-      // 容错降级至下一个竞速通道
-    }
-  }
-
+  const remoteData = await fetchFirstValidVersionJson(candidateUrls);
   if (!remoteData) return null;
 
   const latestVer = (remoteData.version || remoteData.versionTag || '').replace(/^v/i, '');
@@ -140,7 +263,7 @@ export async function checkExtensionUpdate(): Promise<ExtensionUpdateInfo | null
     `https://github.com/${GITHUB_REPO}/releases/download/${verTag}/mantra-key-chrome-extension-${verTag}.zip`;
   const acceleratedUrl = rawUrl.startsWith('http') ? `${ACCELERATOR_PREFIX}${rawUrl}` : rawUrl;
 
-  return {
+  const info: ExtensionUpdateInfo = {
     hasUpdate,
     currentVersion,
     latestVersion: latestVer,
@@ -149,4 +272,8 @@ export async function checkExtensionUpdate(): Promise<ExtensionUpdateInfo | null
     downloadUrl: rawUrl,
     acceleratedDownloadUrl: acceleratedUrl,
   };
+
+  await saveCachedExtensionUpdate(info);
+  await syncExtensionBadge(info.hasUpdate);
+  return info;
 }

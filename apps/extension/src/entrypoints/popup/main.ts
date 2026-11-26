@@ -33,7 +33,14 @@ import {
   normalizeWebDAVUrl,
   type WebDAVConfig,
 } from '../../utils/webdav';
-import { checkExtensionUpdate, performExtensionAutoUpdate } from '../../utils/update';
+import {
+  checkExtensionUpdate,
+  getCachedExtensionUpdate,
+  hasNewUpdateBadge,
+  isUpdateCacheStale,
+  performExtensionAutoUpdate,
+  type ExtensionUpdateInfo,
+} from '../../utils/update';
 
 document.addEventListener('DOMContentLoaded', async () => {
   // DOM 元素引用
@@ -766,30 +773,81 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnToggleMantraEye.title = isMantraPeek ? '点击隐藏口令' : '点击显示明文';
   });
 
-  // 5. 检查插件在线版本更新与一键静默升级
-  checkExtensionUpdate().then((info) => {
-    if (info?.hasUpdate && updateBanner && updateBannerText && btnDownloadUpdate) {
-      updateBanner.style.display = 'flex';
-      updateBannerText.textContent = `🚀 密诀新版本 v${info.latestVersion} 可用！`;
-      btnDownloadUpdate.onclick = async () => {
-        btnDownloadUpdate.disabled = true;
-        btnDownloadUpdate.textContent = '⏳ 更新中...';
-        showToast('正在执行在线自动更新...');
+  // 5. 检查插件在线版本更新与一键静默升级（缓存秒出 + NEW 角标占位 + 并发后台校准）
+  let activeUpdateInfo: ExtensionUpdateInfo | null = null;
 
-        const updateResult = await performExtensionAutoUpdate(info, (statusText) => {
-          showToast(statusText);
-        });
-
-        if (updateResult.success) {
-          showToast(updateResult.message);
-        } else {
-          showToast(updateResult.message, 5000);
-          btnDownloadUpdate.disabled = false;
-          btnDownloadUpdate.textContent = '⚡ 一键更新';
-        }
-      };
+  const renderUpdateBanner = (info: ExtensionUpdateInfo) => {
+    if (!updateBanner || !updateBannerText || !btnDownloadUpdate) return;
+    if (!info.hasUpdate) {
+      activeUpdateInfo = null;
+      updateBanner.style.display = 'none';
+      updateBanner.classList.remove('is-loading');
+      return;
     }
-  }).catch(() => {});
+
+    activeUpdateInfo = info;
+    updateBanner.style.display = 'flex';
+    updateBanner.classList.remove('is-loading');
+    updateBannerText.textContent = `🚀 密诀新版本 v${info.latestVersion} 可用！`;
+    btnDownloadUpdate.style.display = '';
+    btnDownloadUpdate.disabled = false;
+    btnDownloadUpdate.textContent = '⚡ 一键更新';
+  };
+
+  const renderPendingUpdateBanner = () => {
+    if (!updateBanner || !updateBannerText || !btnDownloadUpdate) return;
+    updateBanner.style.display = 'flex';
+    updateBanner.classList.add('is-loading');
+    updateBannerText.textContent = '🔄 发现新版本，正在获取更新详情...';
+    btnDownloadUpdate.style.display = 'none';
+  };
+
+  btnDownloadUpdate?.addEventListener('click', async () => {
+    if (!activeUpdateInfo || !btnDownloadUpdate) return;
+    btnDownloadUpdate.disabled = true;
+    btnDownloadUpdate.textContent = '⏳ 更新中...';
+    showToast('正在执行在线自动更新...');
+
+    const updateResult = await performExtensionAutoUpdate(activeUpdateInfo, (statusText) => {
+      showToast(statusText);
+    });
+
+    if (updateResult.success) {
+      showToast(updateResult.message);
+    } else {
+      showToast(updateResult.message, 5000);
+      btnDownloadUpdate.disabled = false;
+      btnDownloadUpdate.textContent = '⚡ 一键更新';
+    }
+  });
+
+  const initExtensionUpdateCheck = async () => {
+    const [cached, hasBadge] = await Promise.all([
+      getCachedExtensionUpdate(),
+      hasNewUpdateBadge(),
+    ]);
+
+    if (cached?.info?.hasUpdate) {
+      renderUpdateBanner(cached.info);
+    } else if (hasBadge) {
+      // 图标已有 NEW 角标但本地缓存缺失时先给出轻提示，防止几秒后突然下移布局
+      renderPendingUpdateBanner();
+    }
+
+    const shouldRefresh = !cached || isUpdateCacheStale(cached) || (hasBadge && !cached.info.hasUpdate);
+    if (!shouldRefresh) return;
+
+    const freshInfo = await checkExtensionUpdate();
+    if (freshInfo) {
+      renderUpdateBanner(freshInfo);
+    } else if (!cached?.info?.hasUpdate && updateBanner) {
+      // 若网络失败且无可用缓存，收起临时拉取占位提示
+      updateBanner.style.display = 'none';
+      updateBanner.classList.remove('is-loading');
+    }
+  };
+
+  initExtensionUpdateCheck().catch(() => {});
 
   // 6. 快捷示例填充 (若存在)
   codeQuickSample?.addEventListener('click', async () => {

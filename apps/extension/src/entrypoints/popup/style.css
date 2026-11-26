@@ -407,6 +407,11 @@ body.is-unlocked .enclave-badge {
   animation: slideDown 0.25s ease-out;
 }
 
+.update-banner.is-loading {
+  opacity: 0.92;
+  border-style: dashed;
+}
+
 .update-banner-content {
   display: flex;
   align-items: center;

@@ -34,6 +34,7 @@ export default defineConfig({
       'activeTab',
       'storage',
       'scripting',
+      'alarms',
     ],
     host_permissions: [
       'https://raw.githubusercontent.com/*',

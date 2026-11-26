@@ -20,16 +20,41 @@ import {
 import { deriveSitePassword, RulePreset } from '../utils/crypto';
 import { checkExtensionUpdate } from '../utils/update';
 
+const UPDATE_CHECK_ALARM_NAME = 'mantrakey_periodic_update_check';
+
+/**
+ * 执行后台更新探测（自动写入本地缓存并同步扩展图标 NEW 角标）
+ */
+function runBackgroundUpdateCheck(): void {
+  checkExtensionUpdate().catch(() => {});
+}
+
 export default defineBackground(() => {
   console.log('[MantraKey Ext] Background Service Worker 启动');
 
-  // 周期性与启动时检查更新（针对非 Chrome Web Store 独立发布的扩展）
-  checkExtensionUpdate().then((info) => {
-    if (info?.hasUpdate) {
-      chrome.action.setBadgeText({ text: 'NEW' });
-      chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
-    }
-  }).catch(() => {});
+  // 启动时立即检查更新（写入缓存并同步角标，供 Popup 秒级展示）
+  runBackgroundUpdateCheck();
+
+  // 安装或升级后刷新缓存并清理旧角标
+  chrome.runtime.onInstalled?.addListener(() => {
+    runBackgroundUpdateCheck();
+  });
+
+  // 注册每 6 小时周期性静默检查，避免长期不重启浏览器漏收更新提醒
+  if (chrome.alarms) {
+    chrome.alarms.get(UPDATE_CHECK_ALARM_NAME, (existingAlarm) => {
+      const _err = chrome.runtime.lastError;
+      if (!existingAlarm) {
+        chrome.alarms.create(UPDATE_CHECK_ALARM_NAME, { periodInMinutes: 360 });
+      }
+    });
+
+    chrome.alarms.onAlarm.addListener((alarm) => {
+      if (alarm.name === UPDATE_CHECK_ALARM_NAME) {
+        runBackgroundUpdateCheck();
+      }
+    });
+  }
 
   let nativePort: chrome.runtime.Port | null = null;
   let heartbeatManager: HeartbeatManager | null = null;
