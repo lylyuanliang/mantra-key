@@ -29,29 +29,53 @@ export interface AutoUpdateResult {
  */
 export async function performExtensionAutoUpdate(
   info: ExtensionUpdateInfo,
-  onProgress?: (statusText: string) => void
+  onProgress?: (statusText: string, percent?: number) => void
 ): Promise<AutoUpdateResult> {
-  onProgress?.('正在连接本地原生更新代理...');
+  let progressPercent = 12;
+  onProgress?.('正在连接本地原生更新代理...', progressPercent);
 
-  // 1. 发送消息给 background 执行 Native 请求
-  const res = await new Promise<any>((resolve) => {
-    chrome.runtime.sendMessage({
-      action: 'EXECUTE_EXTENSION_AUTO_UPDATE',
-      payload: {
-        downloadUrl: info.acceleratedDownloadUrl,
-        directDownloadUrl: info.downloadUrl,
-        latestVersion: info.latestVersion,
-        sha256: info.sha256,
-        extensionId: chrome.runtime?.id
-      }
-    }, (response) => {
-      const _err = chrome.runtime.lastError;
-      resolve(response);
+  let settled = false;
+  // Native Host 单次 RPC 期间推进阶段进度（封顶 88%，待真实结果返回后再置 100%）
+  const progressTimer = setInterval(() => {
+    if (settled) return;
+    if (progressPercent < 88) {
+      const step = progressPercent < 40 ? 9 : progressPercent < 70 ? 6 : 3;
+      progressPercent = Math.min(88, progressPercent + step);
+    }
+    const stageText =
+      progressPercent < 36
+        ? '正在连接本地原生更新代理...'
+        : progressPercent < 68
+          ? '正在通过加速镜像拉取更新包...'
+          : '正在解压并覆写扩展目录...';
+    onProgress?.(stageText, progressPercent);
+  }, 450);
+
+  let res: any;
+  try {
+    // 1. 发送消息给 background 执行 Native 请求
+    res = await new Promise<any>((resolve) => {
+      chrome.runtime.sendMessage({
+        action: 'EXECUTE_EXTENSION_AUTO_UPDATE',
+        payload: {
+          downloadUrl: info.acceleratedDownloadUrl,
+          directDownloadUrl: info.downloadUrl,
+          latestVersion: info.latestVersion,
+          sha256: info.sha256,
+          extensionId: chrome.runtime?.id
+        }
+      }, (response) => {
+        const _err = chrome.runtime.lastError;
+        resolve(response);
+      });
     });
-  });
+  } finally {
+    settled = true;
+    clearInterval(progressTimer);
+  }
 
   if (res && res.status === 'ok') {
-    onProgress?.('🎉 本地文件覆写完成，正在热重载扩展...');
+    onProgress?.('🎉 本地文件覆写完成，正在热重载扩展...', 100);
     // 延迟 800ms 触发 reload 确保状态渲染与动画完成
     setTimeout(() => {
       chrome.runtime.reload();
@@ -64,7 +88,7 @@ export async function performExtensionAutoUpdate(
   }
 
   // 2. 原生代理不可用时平滑降级为浏览器下载
-  onProgress?.('未检测到本地原生服务，正在为您下载离线更新包...');
+  onProgress?.('未检测到本地原生服务，已切换浏览器下载离线包', 100);
   chrome.tabs.create({ url: info.acceleratedDownloadUrl });
   return {
     success: false,

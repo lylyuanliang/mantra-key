@@ -46,10 +46,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   // DOM 元素引用
   const btnToggleTheme = document.getElementById('btn-toggle-theme') as HTMLButtonElement | null;
 
-  // 扩展自动更新提醒条
+  // 扩展自动更新提醒条与内嵌进度条
   const updateBanner = document.getElementById('update-banner') as HTMLElement | null;
   const updateBannerText = document.getElementById('update-banner-text') as HTMLElement | null;
   const btnDownloadUpdate = document.getElementById('btn-download-update') as HTMLButtonElement | null;
+  const updateProgressWrap = document.getElementById('update-progress-wrap') as HTMLElement | null;
+  const updateProgressFill = document.getElementById('update-progress-fill') as HTMLElement | null;
+  const updateProgressStage = document.getElementById('update-progress-stage') as HTMLElement | null;
+  const updateProgressPercent = document.getElementById('update-progress-percent') as HTMLElement | null;
 
   const headerCanaryChip = document.getElementById('header-canary-chip') as HTMLElement;
   const headerCanaryText = document.getElementById('header-canary-text') as HTMLElement;
@@ -773,8 +777,36 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnToggleMantraEye.title = isMantraPeek ? '点击隐藏口令' : '点击显示明文';
   });
 
-  // 5. 检查插件在线版本更新与一键静默升级（缓存秒出 + NEW 角标占位 + 并发后台校准）
+  // 5. 检查插件在线版本更新与一键静默升级（缓存秒出 + NEW 角标占位 + 内嵌进度条）
   let activeUpdateInfo: ExtensionUpdateInfo | null = null;
+  let isUpdatingExtension = false;
+
+  const setUpdateProgress = (stageText: string, percent: number, isFallback = false) => {
+    const safePercent = Math.max(0, Math.min(100, Math.round(percent)));
+    if (updateProgressWrap) {
+      updateProgressWrap.style.display = 'flex';
+    }
+    if (updateProgressFill) {
+      updateProgressFill.style.width = `${safePercent}%`;
+      updateProgressFill.classList.toggle('is-fallback', isFallback);
+    }
+    if (updateProgressStage) {
+      updateProgressStage.textContent = stageText;
+    }
+    if (updateProgressPercent) {
+      updateProgressPercent.textContent = `${safePercent}%`;
+    }
+  };
+
+  const resetUpdateProgress = () => {
+    if (updateProgressWrap) {
+      updateProgressWrap.style.display = 'none';
+    }
+    if (updateProgressFill) {
+      updateProgressFill.style.width = '0%';
+      updateProgressFill.classList.remove('is-fallback');
+    }
+  };
 
   const renderUpdateBanner = (info: ExtensionUpdateInfo) => {
     if (!updateBanner || !updateBannerText || !btnDownloadUpdate) return;
@@ -782,6 +814,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       activeUpdateInfo = null;
       updateBanner.style.display = 'none';
       updateBanner.classList.remove('is-loading');
+      resetUpdateProgress();
       return;
     }
 
@@ -790,8 +823,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateBanner.classList.remove('is-loading');
     updateBannerText.textContent = `🚀 密诀新版本 v${info.latestVersion} 可用！`;
     btnDownloadUpdate.style.display = '';
-    btnDownloadUpdate.disabled = false;
-    btnDownloadUpdate.textContent = '⚡ 一键更新';
+    if (!isUpdatingExtension) {
+      btnDownloadUpdate.disabled = false;
+      btnDownloadUpdate.textContent = '⚡ 一键更新';
+      resetUpdateProgress();
+    }
   };
 
   const renderPendingUpdateBanner = () => {
@@ -800,24 +836,37 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateBanner.classList.add('is-loading');
     updateBannerText.textContent = '🔄 发现新版本，正在获取更新详情...';
     btnDownloadUpdate.style.display = 'none';
+    resetUpdateProgress();
   };
 
   btnDownloadUpdate?.addEventListener('click', async () => {
-    if (!activeUpdateInfo || !btnDownloadUpdate) return;
+    if (!activeUpdateInfo || !btnDownloadUpdate || isUpdatingExtension) return;
+    isUpdatingExtension = true;
     btnDownloadUpdate.disabled = true;
-    btnDownloadUpdate.textContent = '⏳ 更新中...';
-    showToast('正在执行在线自动更新...');
+    btnDownloadUpdate.textContent = '⏳ 12%';
+    setUpdateProgress('正在连接本地原生更新代理...', 12);
 
-    const updateResult = await performExtensionAutoUpdate(activeUpdateInfo, (statusText) => {
-      showToast(statusText);
-    });
+    try {
+      const updateResult = await performExtensionAutoUpdate(
+        activeUpdateInfo,
+        (statusText, percent = 50) => {
+          setUpdateProgress(statusText, percent);
+          btnDownloadUpdate.textContent = percent >= 100 ? '⏳ 完成中...' : `⏳ ${Math.round(percent)}%`;
+        }
+      );
 
-    if (updateResult.success) {
-      showToast(updateResult.message);
-    } else {
-      showToast(updateResult.message, 5000);
-      btnDownloadUpdate.disabled = false;
-      btnDownloadUpdate.textContent = '⚡ 一键更新';
+      if (updateResult.success) {
+        setUpdateProgress('🎉 覆写完成，正在热重载扩展...', 100);
+        btnDownloadUpdate.textContent = '✓ 已完成';
+        showToast(updateResult.message);
+      } else {
+        setUpdateProgress('未检测到原生代理，已转为浏览器下载离线包', 100, true);
+        showToast(updateResult.message, 5000);
+        btnDownloadUpdate.disabled = false;
+        btnDownloadUpdate.textContent = '⚡ 重试更新';
+      }
+    } finally {
+      isUpdatingExtension = false;
     }
   });
 

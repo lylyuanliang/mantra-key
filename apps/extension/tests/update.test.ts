@@ -76,12 +76,14 @@ test('performExtensionAutoUpdate 成功时应调用原生更新并触发热重�
     acceleratedDownloadUrl: 'https://ghproxy.net/https://example.com/test.zip'
   };
 
-  const logs: string[] = [];
-  const result = await performExtensionAutoUpdate(info, (t) => logs.push(t));
+  const logs: Array<{ text: string; percent?: number }> = [];
+  const result = await performExtensionAutoUpdate(info, (t, percent) => {
+    logs.push({ text: t, percent });
+  });
 
   assert.strictEqual(result.success, true);
   assert.strictEqual(result.isNative, true);
-  assert.ok(logs.some((l) => l.includes('本地文件覆写完成')));
+  assert.ok(logs.some((l) => l.text.includes('本地文件覆写完成') && l.percent === 100));
 });
 
 test('performExtensionAutoUpdate 原生不可用时应平滑降级至浏览器下载', async () => {

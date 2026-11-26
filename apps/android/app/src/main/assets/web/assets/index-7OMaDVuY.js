@@ -109,7 +109,7 @@ const __vitePreload = function preload(baseModule, deps, importerUrl) {
   });
 };
 const acceleratorPrefix = "https://ghproxy.net/";
-const version = "0.1.3.202611261647";
+const version = "0.1.4.202611261720";
 const defaultConfig = {
   acceleratorPrefix,
   version

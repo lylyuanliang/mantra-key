@@ -71,11 +71,22 @@
     <main class="popup-body">
       <!-- 扩展自动更新提醒条 (检测到新版本时自动浮现) -->
       <div class="update-banner" id="update-banner" style="display: none;">
-        <div class="update-banner-content">
-          <span class="update-banner-icon">🚀</span>
-          <span class="update-banner-text" id="update-banner-text">发现新版本</span>
+        <div class="update-banner-main">
+          <div class="update-banner-content">
+            <span class="update-banner-icon">🚀</span>
+            <span class="update-banner-text" id="update-banner-text">发现新版本</span>
+          </div>
+          <button type="button" class="btn-download-update" id="btn-download-update">⚡ 一键更新</button>
         </div>
-        <button type="button" class="btn-download-update" id="btn-download-update">⚡ 一键更新</button>
+        <div class="update-progress-wrap" id="update-progress-wrap" style="display: none;">
+          <div class="update-progress-track">
+            <div class="update-progress-fill" id="update-progress-fill"></div>
+          </div>
+          <div class="update-progress-meta">
+            <span class="update-progress-stage" id="update-progress-stage">正在准备更新...</span>
+            <span class="update-progress-percent" id="update-progress-percent">0%</span>
+          </div>
+        </div>
       </div>
 
       <!-- 当前活动域名卡片 (常驻首屏顶层，打开即知当前站点) -->
