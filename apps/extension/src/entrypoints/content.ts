@@ -17,11 +17,31 @@ export default defineContentScript({
     let currentAnchorInput: HTMLInputElement | null = null;
     let bubbleOpenTimestamp = 0;
 
-    // 监听扩展主题实时切换
+    type MantraTheme = 'light' | 'dark';
+    let currentTheme: MantraTheme = 'light';
+
+    /**
+     * 同步扩展当前浅/深主题至页面内注入的所有密码框微标与悬浮气泡
+     */
+    function applyInPageTheme(theme: MantraTheme) {
+      currentTheme = theme;
+      document
+        .querySelectorAll<HTMLElement>('[data-mantra-badge="true"]')
+        .forEach((badge) => badge.setAttribute('data-theme', theme));
+      if (activeBubbleEl) {
+        activeBubbleEl.setAttribute('data-theme', theme);
+      }
+    }
+
+    // 初始化并实时监听扩展主题切换
     try {
-      chrome.storage.onChanged.addListener((changes, area) => {
-        if (area === 'local' && changes.mantra_theme && activeBubbleEl) {
-          activeBubbleEl.setAttribute('data-theme', changes.mantra_theme.newValue === 'dark' ? 'dark' : 'light');
+      chrome.storage?.local?.get('mantra_theme', (res) => {
+        const _err = chrome.runtime.lastError;
+        applyInPageTheme(res?.mantra_theme === 'dark' ? 'dark' : 'light');
+      });
+      chrome.storage?.onChanged?.addListener((changes, area) => {
+        if (area === 'local' && changes.mantra_theme) {
+          applyInPageTheme(changes.mantra_theme.newValue === 'dark' ? 'dark' : 'light');
         }
       });
     } catch {}
@@ -153,20 +173,23 @@ export default defineContentScript({
       const toast = document.createElement('div');
       toast.className = 'mantra-inpage-toast';
       toast.textContent = text;
+      const isDarkTheme = currentTheme === 'dark';
       Object.assign(toast.style, {
         position: 'fixed',
         top: '20px',
         left: '50%',
         transform: 'translateX(-50%)',
         zIndex: '2147483647',
-        backgroundColor: '#0b0f17',
-        color: '#00f0ff',
-        border: '1px solid rgba(0, 240, 255, 0.4)',
+        backgroundColor: isDarkTheme ? '#0b0f17' : 'rgba(255, 255, 255, 0.96)',
+        color: isDarkTheme ? '#00f0ff' : '#0f172a',
+        border: isDarkTheme ? '1px solid rgba(0, 240, 255, 0.4)' : '1px solid rgba(13, 148, 136, 0.35)',
         borderRadius: '9999px',
         padding: '8px 20px',
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: '12px',
-        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6), 0 0 16px rgba(0, 240, 255, 0.25)',
+        boxShadow: isDarkTheme
+          ? '0 8px 24px rgba(0, 0, 0, 0.6), 0 0 16px rgba(0, 240, 255, 0.25)'
+          : '0 8px 24px rgba(15, 23, 42, 0.14)',
         pointerEvents: 'none',
         transition: 'all 0.3s ease',
       });
@@ -272,8 +295,9 @@ export default defineContentScript({
         safeSendMessage<{ theme?: string }>({ action: 'GET_THEME' }, 300),
       ]);
 
-      const currentTheme = themeRes?.theme === 'dark' ? 'dark' : 'light';
-      bubble.setAttribute('data-theme', currentTheme);
+      const resolvedTheme: MantraTheme = themeRes?.theme === 'dark' ? 'dark' : 'light';
+      applyInPageTheme(resolvedTheme);
+      bubble.setAttribute('data-theme', resolvedTheme);
 
       let isUnlocked = sessionRes?.data?.session_state === 'unlocked';
       let ttlMinutes = Math.floor((sessionRes?.data?.ttl_remaining || 0) / 60);
@@ -965,6 +989,7 @@ export default defineContentScript({
       badge.type = 'button';
       badge.title = '密诀 MantraKey - 一键安全派生与自动填充';
       badge.setAttribute('data-mantra-badge', 'true');
+      badge.setAttribute('data-theme', currentTheme);
       badge.innerHTML = ICONS.key;
 
       // 强制垂直绝对居中，避免错位

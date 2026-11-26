@@ -61,16 +61,16 @@
   width: 24px;
   height: 24px;
   border-radius: 6px;
-  background: linear-gradient(135deg, #10b981 0%, #00f0ff 100%);
-  color: #0b0e14;
-  border: 1px solid rgba(78, 222, 163, 0.7);
+  background: rgba(248, 250, 252, 0.96);
+  color: #0d9488;
+  border: 1px solid rgba(13, 148, 136, 0.32);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer !important;
   pointer-events: auto !important;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
   user-select: none;
   outline: none;
   padding: 0;
@@ -78,8 +78,25 @@
 }
 
 .mantra-in-input-badge:hover {
-  transform: translateY(-50%) scale(1.12);
-  box-shadow: 0 0 16px rgba(0, 240, 255, 0.85);
+  transform: translateY(-50%) scale(1.08);
+  background: #0d9488;
+  color: #ffffff;
+  border-color: #0d9488;
+  box-shadow: 0 2px 8px rgba(13, 148, 136, 0.32);
+}
+
+.mantra-in-input-badge[data-theme="dark"] {
+  background: linear-gradient(135deg, rgba(16, 24, 38, 0.95) 0%, rgba(22, 34, 50, 0.98) 100%);
+  color: #4edea3;
+  border-color: rgba(16, 185, 129, 0.55);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.28);
+}
+
+.mantra-in-input-badge[data-theme="dark"]:hover {
+  background: linear-gradient(135deg, #10b981 0%, #00f0ff 100%);
+  color: #0b0e14;
+  border-color: rgba(78, 222, 163, 0.85);
+  box-shadow: 0 0 14px rgba(0, 240, 255, 0.6);
 }
 
 .mantra-in-input-badge svg {
