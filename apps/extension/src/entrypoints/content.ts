@@ -543,20 +543,45 @@ export default defineContentScript({
             return;
           }
 
+          const escBubbleHtml = (raw: string): string =>
+            raw
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+              .replace(/"/g, '&quot;')
+              .replace(/'/g, '&#39;');
+
           itemsContainer.innerHTML = filtered.map((g) => {
             const isCurrent = g.domain.toLowerCase() === currentDomain.toLowerCase();
             const hasCustom = Boolean(g.displayName && g.displayName !== g.unicodeDomain && g.displayName !== g.domain);
-            const title = hasCustom ? g.displayName : g.unicodeDomain;
+            const title = hasCustom ? g.displayName! : g.unicodeDomain;
             const subtitle = hasCustom ? g.unicodeDomain : '';
+            const assocList = Array.isArray(g.associatedDomains) ? g.associatedDomains : [];
 
-            const assocHtml = (g.associatedDomains && g.associatedDomains.length > 0)
-              ? `
-                <div style="font-size: 9.5px; color: #64748b; margin-top: 3px; display: flex; flex-wrap: wrap; gap: 3px; align-items: center;">
-                  <span style="font-weight: 600;">🔗 关联(${g.associatedDomains.length}):</span>
-                  ${g.associatedDomains.map((d) => `<span style="background: rgba(13, 148, 136, 0.12); color: #0d9488; padding: 0 4px; border-radius: 2px;">${d}</span>`).join('')}
+            const assocPills = assocList.map((d) => {
+              const safeD = escBubbleHtml(d);
+              return `
+                <span class="bubble-assoc-pill" title="${safeD}">
+                  <span>${safeD}</span>
+                  <button type="button" class="btn-bubble-remove-assoc" data-domain="${escBubbleHtml(g.domain)}" data-alias="${safeD}" title="取消关联 ${safeD}">×</button>
+                </span>
+              `;
+            }).join('');
+
+            const assocHtml = `
+              <div class="bubble-assoc-drawer${assocList.length === 0 ? ' is-empty' : ''}" data-card-domain="${escBubbleHtml(g.domain)}">
+                <div class="bubble-assoc-header">
+                  <span class="bubble-assoc-title">${assocList.length > 0 ? `🔗 关联网站 (${assocList.length})` : '🔗 关联网站：暂无'}</span>
+                  <button type="button" class="btn-bubble-add-assoc" data-domain="${escBubbleHtml(g.domain)}">+ 添加关联</button>
                 </div>
-              `
-              : '';
+                ${assocList.length > 0 ? `<div class="bubble-assoc-list">${assocPills}</div>` : ''}
+                <div class="bubble-assoc-inline" style="display: none;">
+                  <input type="text" class="bubble-assoc-input" placeholder="输入镜像域名或 *.example.com" />
+                  <button type="button" class="btn-bubble-assoc-confirm" data-domain="${escBubbleHtml(g.domain)}">确定</button>
+                  <button type="button" class="btn-bubble-assoc-cancel">取消</button>
+                </div>
+              </div>
+            `;
 
             return `
               <div class="bubble-manifest-group-card">
@@ -564,17 +589,17 @@ export default defineContentScript({
                   <div style="display: flex; flex-direction: column; gap: 1px; overflow: hidden; min-width: 0;">
                     <div style="display: flex; align-items: center; gap: 4px; overflow: hidden;">
                       <span style="font-size: 13px; flex-shrink: 0;">${hasCustom ? '🏷️' : '🌐'}</span>
-                      <span class="bubble-domain-title-text" style="font-weight: 700; font-size: 11.5px; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;" title="双击或点击 ✏️ 修改备注名称" data-domain="${g.domain}" data-name="${g.displayName || ''}">
-                        ${title}
+                      <span class="bubble-domain-title-text" style="font-weight: 700; font-size: 11.5px; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;" title="双击或点击 ✏️ 修改备注名称" data-domain="${escBubbleHtml(g.domain)}" data-name="${escBubbleHtml(g.displayName || '')}">
+                        ${escBubbleHtml(title)}
                       </span>
-                      <button type="button" class="btn-edit-alias-inline" data-domain="${g.domain}" data-name="${g.displayName || ''}" title="点击修改备注名称" style="border: none; background: transparent; cursor: pointer; font-size: 11px; opacity: 0.6; padding: 0 3px;">✏️</button>
-                      ${g.serviceKey && g.serviceKey !== g.displayName ? `<span style="font-size: 9px; background: rgba(13, 148, 136, 0.15); color: #0d9488; padding: 1px 4px; border-radius: 3px;">🏷️ ${g.serviceKey}</span>` : ''}
+                      <button type="button" class="btn-edit-alias-inline" data-domain="${escBubbleHtml(g.domain)}" data-name="${escBubbleHtml(g.displayName || '')}" title="点击修改备注名称" style="border: none; background: transparent; cursor: pointer; font-size: 11px; opacity: 0.6; padding: 0 3px;">✏️</button>
+                      ${g.serviceKey && g.serviceKey !== g.displayName ? `<span style="font-size: 9px; background: rgba(13, 148, 136, 0.15); color: #0d9488; padding: 1px 4px; border-radius: 3px;">🏷️ ${escBubbleHtml(g.serviceKey)}</span>` : ''}
                     </div>
-                    ${subtitle ? `<span style="font-size: 9.5px; color: #64748b; margin-left: 17px;">🌐 ${subtitle}</span>` : ''}
+                    ${subtitle ? `<span style="font-size: 9.5px; color: #64748b; margin-left: 17px;">🌐 ${escBubbleHtml(subtitle)}</span>` : ''}
                   </div>
                   <div style="display: flex; gap: 4px; flex-shrink: 0;">
                     ${!isCurrent ? `
-                      <button type="button" class="mantra-bubble-header-btn btn-link-this-group" data-domain="${g.domain}" data-name="${title}" style="padding: 2px 6px; color: #0d9488; border-color: #0d9488;" title="将当前网页关联为此站点的镜像">
+                      <button type="button" class="mantra-bubble-header-btn btn-link-this-group" data-domain="${escBubbleHtml(g.domain)}" data-name="${escBubbleHtml(title)}" style="padding: 2px 6px; color: #0d9488; border-color: #0d9488;" title="将当前网页关联为此站点的镜像">
                         🔗 关联当前页
                       </button>
                     ` : '<span style="font-size: 9px; color: #0d9488; font-weight: 600;">✓ 当前站点</span>'}
@@ -584,7 +609,7 @@ export default defineContentScript({
                 <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;">
                   ${g.accounts.map((a) => `
                     <span style="font-size: 10px; background: #e2e8f0; color: #334155; padding: 1px 5px; border-radius: 3px;">
-                      ${a.username} (v${a.version})
+                      ${escBubbleHtml(a.username)} (v${a.version})
                     </span>
                   `).join('')}
                 </div>
@@ -662,6 +687,87 @@ export default defineContentScript({
                 (btn as HTMLButtonElement).disabled = false;
                 (btn as HTMLButtonElement).textContent = '🔗 关联当前页';
               }
+            });
+          });
+
+          // 绑定内联添加/解绑关联网站事件
+          itemsContainer.querySelectorAll('.bubble-assoc-drawer').forEach((drawer) => {
+            const domain = (drawer as HTMLElement).dataset.cardDomain || '';
+            const btnAdd = drawer.querySelector('.btn-bubble-add-assoc') as HTMLButtonElement | null;
+            const inlineBox = drawer.querySelector('.bubble-assoc-inline') as HTMLElement | null;
+            const inputEl = drawer.querySelector('.bubble-assoc-input') as HTMLInputElement | null;
+            const btnConfirm = drawer.querySelector('.btn-bubble-assoc-confirm') as HTMLButtonElement | null;
+            const btnCancel = drawer.querySelector('.btn-bubble-assoc-cancel') as HTMLButtonElement | null;
+
+            const refreshManifestGroups = async () => {
+              const refreshed = await safeSendMessage<{ groups?: any[] }>({ action: 'GET_ALL_MANIFEST' }, 800);
+              if (refreshed?.groups) {
+                groups.splice(0, groups.length, ...refreshed.groups);
+                const searchInput = bubble.querySelector<HTMLInputElement>('#bubble-manifest-search');
+                renderGroupCards(searchInput?.value || '');
+              }
+            };
+
+            const submitAdd = async () => {
+              const alias = inputEl?.value.trim() || '';
+              const res = await safeSendMessage<{ ok?: boolean; message?: string }>({
+                action: 'ADD_DOMAIN_ALIAS',
+                payload: { domain, alias }
+              }, 800);
+              if (res?.ok) {
+                showInPageToast(`✓ ${res.message || '已添加关联域名'}`);
+                await refreshManifestGroups();
+              } else {
+                showInPageToast(`⚠️ ${res?.message || '请输入有效域名'}`);
+                inputEl?.focus();
+              }
+            };
+
+            btnAdd?.addEventListener('click', (e) => {
+              e.stopPropagation();
+              if (!inlineBox) return;
+              const hidden = inlineBox.style.display === 'none' || !inlineBox.style.display;
+              inlineBox.style.display = hidden ? 'flex' : 'none';
+              if (hidden) inputEl?.focus();
+            });
+
+            btnCancel?.addEventListener('click', (e) => {
+              e.stopPropagation();
+              if (inlineBox) inlineBox.style.display = 'none';
+              if (inputEl) inputEl.value = '';
+            });
+
+            btnConfirm?.addEventListener('click', (e) => {
+              e.stopPropagation();
+              submitAdd();
+            });
+
+            inputEl?.addEventListener('keydown', (e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                submitAdd();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                if (inlineBox) inlineBox.style.display = 'none';
+              }
+            });
+
+            drawer.querySelectorAll('.btn-bubble-remove-assoc').forEach((rmBtn) => {
+              rmBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const alias = (rmBtn as HTMLElement).dataset.alias || '';
+                if (!alias) return;
+                const res = await safeSendMessage<{ ok?: boolean }>({
+                  action: 'REMOVE_DOMAIN_ALIAS',
+                  payload: { domain, alias }
+                }, 800);
+                if (res?.ok) {
+                  showInPageToast(`已取消关联 [${alias}]`);
+                  await refreshManifestGroups();
+                } else {
+                  showInPageToast('❌ 取消关联失败');
+                }
+              });
             });
           });
         }

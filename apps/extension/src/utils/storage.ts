@@ -390,6 +390,150 @@ export async function linkDomainToExisting(targetDomain: string, sourceDomain: s
 }
 
 /**
+ * 规范化关联域名/通配符输入（支持粘贴完整 URL、大小写及 Punycode，保留 *. 通配符）
+ */
+export function normalizeDomainAliasInput(raw: string): string {
+  if (!raw || typeof raw !== 'string') return '';
+  let value = raw.trim();
+  if (!value) return '';
+
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      value = new URL(value).hostname;
+    } catch {
+      value = value.replace(/^https?:\/\//i, '');
+    }
+  } else {
+    value = value.split('/')[0];
+  }
+
+  // 去除端口号并转为小写 Unicode（保留 *. 通配符前缀）
+  value = value.replace(/:\d+$/, '').trim().toLowerCase();
+  if (!value || value.includes(' ')) return '';
+  return toUnicodeDomain(value);
+}
+
+/**
+ * 为指定站点追加一个关联镜像域名/通配符，并确保派生基准 serviceKey 一致
+ */
+export async function addDomainAlias(
+  sourceDomain: string,
+  rawAlias: string
+): Promise<{ ok: boolean; alias?: string; message?: string }> {
+  const cleanSource = sourceDomain.trim().toLowerCase();
+  const sourceUnicode = toUnicodeDomain(cleanSource);
+  const alias = normalizeDomainAliasInput(rawAlias);
+
+  if (!cleanSource || !alias) {
+    return { ok: false, message: '请输入有效的关联域名或通配符' };
+  }
+  if (alias === cleanSource || alias === sourceUnicode) {
+    return { ok: false, message: '无需将当前站点域名关联给自己' };
+  }
+
+  const sourceKey = `${ACCOUNTS_PREFIX}${cleanSource}`;
+  const res = await chrome.storage.local.get([sourceKey]);
+  const sourceAccs = Array.isArray(res[sourceKey]) ? (res[sourceKey] as AccountRecord[]) : [];
+  if (sourceAccs.length === 0) {
+    return { ok: false, message: '当前站点尚无账号记录，无法添加关联域名' };
+  }
+
+  const canonicalServiceKey = sourceAccs.find((a) => a.serviceKey)?.serviceKey || cleanSource;
+  const now = Date.now();
+  let alreadyExists = false;
+
+  const updated = sourceAccs.map((acc) => {
+    const existingAliases = Array.isArray(acc.aliases) ? [...acc.aliases] : [];
+    const hasMatch = existingAliases.some(
+      (item) => toUnicodeDomain(item.trim().toLowerCase()) === alias
+    );
+    if (hasMatch) {
+      alreadyExists = true;
+    } else {
+      existingAliases.push(alias);
+    }
+    return {
+      ...acc,
+      serviceKey: acc.serviceKey || canonicalServiceKey,
+      aliases: existingAliases,
+      updatedAt: now,
+    };
+  });
+
+  await chrome.storage.local.set({ [sourceKey]: updated });
+  return {
+    ok: true,
+    alias,
+    message: alreadyExists ? `关联域名 [${alias}] 已存在` : `已添加关联域名 [${alias}]`,
+  };
+}
+
+/**
+ * 从指定站点移除一个关联域名/通配符（若存在双向自动关联记录则同步解绑）
+ */
+export async function removeDomainAlias(sourceDomain: string, rawAlias: string): Promise<boolean> {
+  const cleanSource = sourceDomain.trim().toLowerCase();
+  const sourceUnicode = toUnicodeDomain(cleanSource);
+  const targetAlias = normalizeDomainAliasInput(rawAlias);
+  if (!cleanSource || !targetAlias) return false;
+
+  const allStorage = await chrome.storage.local.get(null);
+  const sourceKey = `${ACCOUNTS_PREFIX}${cleanSource}`;
+  const sourceAccs = Array.isArray(allStorage[sourceKey]) ? (allStorage[sourceKey] as AccountRecord[]) : [];
+  if (sourceAccs.length === 0) return false;
+
+  const now = Date.now();
+  const isTargetMatch = (candidate: string) => {
+    const norm = toUnicodeDomain(candidate.trim().toLowerCase());
+    return norm === targetAlias || candidate.trim().toLowerCase() === rawAlias.trim().toLowerCase();
+  };
+
+  const updatedSource = sourceAccs.map((acc) => ({
+    ...acc,
+    aliases: Array.isArray(acc.aliases) ? acc.aliases.filter((item) => !isTargetMatch(item)) : undefined,
+    tag: acc.tag?.startsWith('已关联:') && isTargetMatch(acc.tag.replace(/^已关联:\s*/, ''))
+      ? 'Personal'
+      : acc.tag,
+    updatedAt: now,
+  }));
+
+  const updates: Record<string, AccountRecord[]> = { [sourceKey]: updatedSource };
+
+  // 若目标镜像域名也存在独立存储记录，清理反向别名与自动关联标记，避免 serviceKey 再次聚合回显
+  for (const [storageKey, val] of Object.entries(allStorage)) {
+    if (!storageKey.startsWith(ACCOUNTS_PREFIX) || storageKey === sourceKey || !Array.isArray(val)) {
+      continue;
+    }
+    const candidateDomain = storageKey.substring(ACCOUNTS_PREFIX.length);
+    if (!isTargetMatch(candidateDomain)) continue;
+
+    const sourceServiceKey = sourceAccs.find((a) => a.serviceKey)?.serviceKey?.trim().toLowerCase();
+    const cleanedTarget = (val as AccountRecord[]).map((acc) => {
+      const nextAliases = Array.isArray(acc.aliases)
+        ? acc.aliases.filter((item) => {
+            const norm = toUnicodeDomain(item.trim().toLowerCase());
+            return norm !== cleanSource && norm !== sourceUnicode;
+          })
+        : undefined;
+      const wasAutoLinked = Boolean(acc.tag?.startsWith('已关联:'));
+      const sharesSourceKey = Boolean(sourceServiceKey && acc.serviceKey?.trim().toLowerCase() === sourceServiceKey);
+
+      return {
+        ...acc,
+        aliases: nextAliases,
+        tag: wasAutoLinked ? 'Personal' : acc.tag,
+        serviceKey: wasAutoLinked && sharesSourceKey ? candidateDomain : acc.serviceKey,
+        updatedAt: now,
+      };
+    });
+    updates[storageKey] = cleanedTarget;
+  }
+
+  await chrome.storage.local.set(updates);
+  return true;
+}
+
+/**
  * 保存或更新指定域名的账号记录
  */
 export async function saveAccountForDomain(

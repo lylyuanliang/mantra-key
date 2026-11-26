@@ -836,6 +836,11 @@
           canonicalDomain: newer.canonicalDomain,
           displayName: newer.displayName || localDomain.displayName,
           rulePreset: newer.rulePreset || localDomain.rulePreset,
+          serviceKey: newer.serviceKey || localDomain.serviceKey,
+          associatedDomains: Array.from(new Set([
+            ...(Array.isArray(localDomain.associatedDomains) ? localDomain.associatedDomains : []),
+            ...(Array.isArray(remoteDomain.associatedDomains) ? remoteDomain.associatedDomains : [])
+          ])),
           accounts: combinedAccounts,
           updatedAt: Math.max(localDomain.updatedAt, remoteDomain.updatedAt)
         };

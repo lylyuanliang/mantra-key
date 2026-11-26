@@ -109,7 +109,7 @@ const __vitePreload = function preload(baseModule, deps, importerUrl) {
   });
 };
 const acceleratorPrefix = "https://ghproxy.net/";
-const version = "0.1.4.202611261720";
+const version = "0.1.5.202611261815";
 const defaultConfig = {
   acceleratorPrefix,
   version
@@ -523,6 +523,219 @@ function removeDomainRule(canonicalDomain) {
   }
   return manifest;
 }
+function decodePunycodePart(input) {
+  const maxInt = 2147483647;
+  const base = 36;
+  const tMin = 1;
+  const tMax = 26;
+  const skew = 38;
+  const damp = 700;
+  let n = 128;
+  let i = 0;
+  let bias = 72;
+  const adapt = (delta, numPoints, firstTime) => {
+    let k = 0;
+    let d = firstTime ? Math.floor(delta / damp) : delta >> 1;
+    d += Math.floor(d / numPoints);
+    for (; d > (base - tMin) * tMax >> 1; k += base) {
+      d = Math.floor(d / (base - tMin));
+    }
+    return Math.floor(k + (base - tMin + 1) * d / (d + skew));
+  };
+  const decodeDigit = (cp) => cp - 48 < 10 ? cp - 22 : cp - 65 < 26 ? cp - 65 : cp - 97 < 26 ? cp - 97 : base;
+  const output = [];
+  const basic = input.lastIndexOf("-");
+  if (basic > 0) {
+    for (let j = 0; j < basic; ++j) output.push(input.charCodeAt(j));
+  }
+  let index = basic > 0 ? basic + 1 : 0;
+  while (index < input.length) {
+    const oldi = i;
+    let w = 1;
+    for (let k = base; ; k += base) {
+      if (index >= input.length) return input;
+      const digit = decodeDigit(input.charCodeAt(index++));
+      if (digit >= base) return input;
+      if (digit > Math.floor((maxInt - i) / w)) return input;
+      i += digit * w;
+      const t = k <= bias ? tMin : k >= bias + tMax ? tMax : k - bias;
+      if (digit < t) break;
+      if (w > Math.floor(maxInt / (base - t))) return input;
+      w *= base - t;
+    }
+    const out = output.length + 1;
+    bias = adapt(i - oldi, out, oldi === 0);
+    if (Math.floor(i / out) > maxInt - n) return input;
+    n += Math.floor(i / out);
+    i %= out;
+    output.splice(i++, 0, n);
+  }
+  return String.fromCodePoint(...output);
+}
+function toUnicodeDomain(domain) {
+  if (!domain || typeof domain !== "string") return "";
+  return domain.split(".").map((part) => part.startsWith("xn--") ? decodePunycodePart(part.slice(4)) : part).join(".");
+}
+function normalizeAliasInput(raw) {
+  if (!raw || typeof raw !== "string") return "";
+  let value = raw.trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      value = new URL(value).hostname;
+    } catch {
+      value = value.replace(/^https?:\/\//i, "");
+    }
+  } else {
+    value = value.split("/")[0];
+  }
+  value = value.replace(/:\d+$/, "").trim().toLowerCase();
+  if (!value || value.includes(" ")) return "";
+  return toUnicodeDomain(value);
+}
+function getEntryAssociatedDomains(manifest, entry) {
+  const selfRaw = (entry.canonicalDomain || "").trim().toLowerCase();
+  const selfUnicode = toUnicodeDomain(selfRaw);
+  const result = /* @__PURE__ */ new Set();
+  const addIfOther = (raw) => {
+    const clean = toUnicodeDomain((raw || "").trim().toLowerCase());
+    if (clean && clean !== selfRaw && clean !== selfUnicode) {
+      result.add(clean);
+    }
+  };
+  if (Array.isArray(entry.associatedDomains)) {
+    entry.associatedDomains.forEach(addIfOther);
+  }
+  const serviceKeys = /* @__PURE__ */ new Set();
+  if (entry.serviceKey) serviceKeys.add(entry.serviceKey.trim().toLowerCase());
+  for (const acc of Object.values(entry.accounts || {})) {
+    if (acc.isDeleted) continue;
+    if (acc.serviceKey) serviceKeys.add(acc.serviceKey.trim().toLowerCase());
+    if (Array.isArray(acc.aliases)) {
+      acc.aliases.forEach(addIfOther);
+    }
+  }
+  if (serviceKeys.size > 0) {
+    for (const [otherKey, otherEntry] of Object.entries(manifest.domains || {})) {
+      if (otherKey.toLowerCase() === selfRaw) continue;
+      const otherKeys = [];
+      if (otherEntry.serviceKey) otherKeys.push(otherEntry.serviceKey.trim().toLowerCase());
+      for (const acc of Object.values(otherEntry.accounts || {})) {
+        if (!acc.isDeleted && acc.serviceKey) {
+          otherKeys.push(acc.serviceKey.trim().toLowerCase());
+        }
+      }
+      if (otherKeys.some((sk) => serviceKeys.has(sk))) {
+        addIfOther(otherEntry.canonicalDomain || otherKey);
+      }
+    }
+  }
+  return Array.from(result);
+}
+function addManifestDomainAlias(canonicalDomain, rawAlias) {
+  const manifest = getLocalManifest();
+  const domainKey = canonicalDomain.trim().toLowerCase();
+  const entry = manifest.domains[domainKey];
+  const alias = normalizeAliasInput(rawAlias);
+  if (!entry) {
+    return { ok: false, message: "未找到该站点记录" };
+  }
+  if (!alias) {
+    return { ok: false, message: "请输入有效的关联域名或通配符" };
+  }
+  if (alias === domainKey || alias === toUnicodeDomain(domainKey)) {
+    return { ok: false, message: "无需关联当前站点自身" };
+  }
+  const now = Date.now();
+  const assocSet = new Set(
+    (entry.associatedDomains || []).map((d) => toUnicodeDomain(d.trim().toLowerCase()))
+  );
+  const alreadyExists = assocSet.has(alias);
+  assocSet.add(alias);
+  const updatedAccounts = { ...entry.accounts || {} };
+  for (const [userKey, acc] of Object.entries(updatedAccounts)) {
+    if (acc.isDeleted) continue;
+    const accAliases = new Set(
+      (acc.aliases || []).map((d) => toUnicodeDomain(d.trim().toLowerCase()))
+    );
+    accAliases.add(alias);
+    updatedAccounts[userKey] = {
+      ...acc,
+      serviceKey: acc.serviceKey || entry.serviceKey || domainKey,
+      aliases: Array.from(accAliases),
+      updatedAt: now
+    };
+  }
+  manifest.domains[domainKey] = {
+    ...entry,
+    serviceKey: entry.serviceKey || domainKey,
+    associatedDomains: Array.from(assocSet),
+    accounts: updatedAccounts,
+    updatedAt: now
+  };
+  manifest.updatedAt = now;
+  saveLocalManifest(manifest);
+  return {
+    ok: true,
+    alias,
+    message: alreadyExists ? `关联域名 [${alias}] 已存在` : `已添加关联域名 [${alias}]`
+  };
+}
+function removeManifestDomainAlias(canonicalDomain, rawAlias) {
+  const manifest = getLocalManifest();
+  const domainKey = canonicalDomain.trim().toLowerCase();
+  const domainUnicode = toUnicodeDomain(domainKey);
+  const entry = manifest.domains[domainKey];
+  const targetAlias = normalizeAliasInput(rawAlias);
+  if (!entry || !targetAlias) return false;
+  const now = Date.now();
+  const isTarget = (candidate) => toUnicodeDomain(candidate.trim().toLowerCase()) === targetAlias;
+  const nextAssoc = (entry.associatedDomains || []).filter((d) => !isTarget(d));
+  const nextAccounts = {};
+  for (const [userKey, acc] of Object.entries(entry.accounts || {})) {
+    nextAccounts[userKey] = {
+      ...acc,
+      aliases: Array.isArray(acc.aliases) ? acc.aliases.filter((d) => !isTarget(d)) : void 0,
+      updatedAt: now
+    };
+  }
+  manifest.domains[domainKey] = {
+    ...entry,
+    associatedDomains: nextAssoc.length > 0 ? nextAssoc : void 0,
+    accounts: nextAccounts,
+    updatedAt: now
+  };
+  for (const [otherKey, otherEntry] of Object.entries(manifest.domains)) {
+    if (otherKey.toLowerCase() === domainKey || !isTarget(otherKey)) continue;
+    const cleanedOtherAssoc = (otherEntry.associatedDomains || []).filter((d) => {
+      const n = toUnicodeDomain(d.trim().toLowerCase());
+      return n !== domainKey && n !== domainUnicode;
+    });
+    const otherAccs = {};
+    for (const [uKey, acc] of Object.entries(otherEntry.accounts || {})) {
+      const cleanedAliases = Array.isArray(acc.aliases) ? acc.aliases.filter((d) => {
+        const n = toUnicodeDomain(d.trim().toLowerCase());
+        return n !== domainKey && n !== domainUnicode;
+      }) : void 0;
+      otherAccs[uKey] = {
+        ...acc,
+        aliases: cleanedAliases,
+        serviceKey: acc.serviceKey === (entry.serviceKey || domainKey) ? otherKey : acc.serviceKey,
+        updatedAt: now
+      };
+    }
+    manifest.domains[otherKey] = {
+      ...otherEntry,
+      serviceKey: otherEntry.serviceKey === (entry.serviceKey || domainKey) ? otherKey : otherEntry.serviceKey,
+      associatedDomains: cleanedOtherAssoc.length > 0 ? cleanedOtherAssoc : void 0,
+      accounts: otherAccs,
+      updatedAt: now
+    };
+  }
+  manifest.updatedAt = now;
+  saveLocalManifest(manifest);
+  return true;
+}
 function mergeManifests(local, remote) {
   const merged = {
     schemaVersion: Math.max(local.schemaVersion || 1, remote.schemaVersion || 1),
@@ -542,17 +755,35 @@ function mergeManifests(local, remote) {
         if (!localAcc) {
           combinedAccounts[userKey] = remoteAcc;
         } else {
+          const mergedAliases = Array.from(/* @__PURE__ */ new Set([
+            ...Array.isArray(localAcc.aliases) ? localAcc.aliases : [],
+            ...Array.isArray(remoteAcc.aliases) ? remoteAcc.aliases : []
+          ]));
           if (remoteAcc.version > localAcc.version || remoteAcc.version === localAcc.version && remoteAcc.updatedAt > localAcc.updatedAt) {
-            combinedAccounts[userKey] = remoteAcc;
+            combinedAccounts[userKey] = {
+              ...remoteAcc,
+              serviceKey: remoteAcc.serviceKey || localAcc.serviceKey,
+              aliases: mergedAliases.length > 0 ? mergedAliases : void 0
+            };
+          } else {
+            combinedAccounts[userKey] = {
+              ...localAcc,
+              serviceKey: localAcc.serviceKey || remoteAcc.serviceKey,
+              aliases: mergedAliases.length > 0 ? mergedAliases : void 0
+            };
           }
         }
       }
+      const mergedAssoc = Array.from(/* @__PURE__ */ new Set([
+        ...Array.isArray(localDomain.associatedDomains) ? localDomain.associatedDomains : [],
+        ...Array.isArray(remoteDomain.associatedDomains) ? remoteDomain.associatedDomains : []
+      ]));
       merged.domains[domainKey] = {
         canonicalDomain: newerDomain.canonicalDomain,
         displayName: newerDomain.displayName || localDomain.displayName,
         rulePreset: newerDomain.rulePreset || localDomain.rulePreset,
         serviceKey: newerDomain.serviceKey || localDomain.serviceKey,
-        associatedDomains: newerDomain.associatedDomains || localDomain.associatedDomains,
+        associatedDomains: mergedAssoc.length > 0 ? mergedAssoc : void 0,
         accounts: combinedAccounts,
         updatedAt: Math.max(localDomain.updatedAt, remoteDomain.updatedAt)
       };
@@ -904,66 +1135,6 @@ function setSessionMasterMantra(mantra) {
       (_a = window.__refreshWebDAVRulesList) == null ? void 0 : _a.call(window);
     }, 15 * 60 * 1e3);
   }
-}
-function decodePunycodePart(input) {
-  const maxInt = 2147483647;
-  const base = 36;
-  const tMin = 1;
-  const tMax = 26;
-  const skew = 38;
-  const damp = 700;
-  const initialBias = 72;
-  const initialN = 128;
-  const delimiter = "-";
-  function adapt(delta, numPoints, firstTime) {
-    let k = 0;
-    delta = firstTime ? Math.floor(delta / damp) : delta >> 1;
-    delta += Math.floor(delta / numPoints);
-    for (; delta > (base - tMin) * tMax >> 1; k += base) {
-      delta = Math.floor(delta / (base - tMin));
-    }
-    return Math.floor(k + (base - tMin + 1) * delta / (delta + skew));
-  }
-  function decodeDigit(cp) {
-    return cp - 48 < 10 ? cp - 22 : cp - 65 < 26 ? cp - 65 : cp - 97 < 26 ? cp - 97 : base;
-  }
-  const output = [];
-  const basic = input.lastIndexOf(delimiter);
-  let n = initialN;
-  let i = 0;
-  let bias = initialBias;
-  if (basic > 0) {
-    for (let j = 0; j < basic; ++j) {
-      output.push(input.charCodeAt(j));
-    }
-  }
-  let index = basic > 0 ? basic + 1 : 0;
-  while (index < input.length) {
-    const oldi = i;
-    let w = 1;
-    for (let k = base; ; k += base) {
-      if (index >= input.length) return input;
-      const digit = decodeDigit(input.charCodeAt(index++));
-      if (digit >= base) return input;
-      if (digit > Math.floor((maxInt - i) / w)) return input;
-      i += digit * w;
-      const t = k <= bias ? tMin : k >= bias + tMax ? tMax : k - bias;
-      if (digit < t) break;
-      if (w > Math.floor(maxInt / (base - t))) return input;
-      w *= base - t;
-    }
-    const out = output.length + 1;
-    bias = adapt(i - oldi, out, oldi === 0);
-    if (Math.floor(i / out) > maxInt - n) return input;
-    n += Math.floor(i / out);
-    i %= out;
-    output.splice(i++, 0, n);
-  }
-  return String.fromCodePoint(...output);
-}
-function toUnicodeDomain(domain) {
-  if (!domain || typeof domain !== "string") return "";
-  return domain.split(".").map((part) => part.startsWith("xn--") ? decodePunycodePart(part.slice(4)) : part).join(".");
 }
 function showToast(message, duration = 2500) {
   const existing = document.querySelector(".toast-container");
@@ -1674,6 +1845,7 @@ function setupWebDAVSync() {
     if (countRulesEl) {
       countRulesEl.textContent = String(domainKeys.length);
     }
+    const escVaultHtml = (raw) => raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
     if (vaultSearchKeyword) {
       domainKeys = domainKeys.filter((k) => {
         const item = allDomains[k];
@@ -1682,8 +1854,10 @@ function setupWebDAVSync() {
         const rawDom = (item.canonicalDomain || "").toLowerCase();
         const disp = (item.displayName || "").toLowerCase();
         const preset = (item.rulePreset || "").toLowerCase();
+        const serviceKey = (item.serviceKey || "").toLowerCase();
         const accs = Object.keys(item.accounts || {}).join(" ").toLowerCase();
-        return unicodeDom.includes(vaultSearchKeyword) || rawDom.includes(vaultSearchKeyword) || disp.includes(vaultSearchKeyword) || preset.includes(vaultSearchKeyword) || accs.includes(vaultSearchKeyword);
+        const assocDomains = getEntryAssociatedDomains(manifest, item).join(" ").toLowerCase();
+        return unicodeDom.includes(vaultSearchKeyword) || rawDom.includes(vaultSearchKeyword) || disp.includes(vaultSearchKeyword) || preset.includes(vaultSearchKeyword) || serviceKey.includes(vaultSearchKeyword) || accs.includes(vaultSearchKeyword) || assocDomains.includes(vaultSearchKeyword);
       });
     }
     if (domainKeys.length === 0) {
@@ -1692,7 +1866,7 @@ function setupWebDAVSync() {
           <div class="vault-empty-state">
             <span class="empty-icon">🔍</span>
             <div class="empty-title">未找到匹配站点</div>
-            <div class="empty-text">没有与 "${vaultSearchKeyword}" 匹配的域名或账号</div>
+            <div class="empty-text">没有与 "${escVaultHtml(vaultSearchKeyword)}" 匹配的域名或账号</div>
             <button type="button" class="btn-reset-search" id="btn-reset-search-empty">清空搜索词</button>
           </div>
         `;
@@ -1735,27 +1909,52 @@ function setupWebDAVSync() {
       const subDomainText = hasCustomAlias ? unicodeDomain : unicodeDomain !== item.canonicalDomain ? item.canonicalDomain : "";
       const presetObj = RULE_PRESETS[item.rulePreset] || RULE_PRESETS["standard-16"];
       const presetName = (presetObj == null ? void 0 : presetObj.name) || item.rulePreset;
+      const assocDomains = getEntryAssociatedDomains(manifest, item);
       const accounts = Object.values(item.accounts || {}).filter((a) => !a.isDeleted);
       const safeDomainId = item.canonicalDomain.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const assocPillsHtml = assocDomains.map((d) => {
+        const safeD = escVaultHtml(d);
+        return `
+            <span class="vault-assoc-pill" title="${safeD}">
+              <span>${safeD}</span>
+              <button type="button" class="btn-vault-remove-assoc" data-domain="${escVaultHtml(item.canonicalDomain)}" data-alias="${safeD}" title="取消关联 ${safeD}">×</button>
+            </span>
+          `;
+      }).join("");
+      const assocDrawerHtml = `
+          <div class="vault-assoc-drawer${assocDomains.length === 0 ? " is-empty" : ""}" data-card-domain="${escVaultHtml(item.canonicalDomain)}">
+            <div class="vault-assoc-header">
+              <span class="vault-assoc-title">${assocDomains.length > 0 ? `🔗 关联网站 (${assocDomains.length})` : "🔗 关联网站：暂无"}</span>
+              <button type="button" class="btn-vault-add-assoc" data-domain="${escVaultHtml(item.canonicalDomain)}">+ 添加关联</button>
+            </div>
+            ${assocDomains.length > 0 ? `<div class="vault-assoc-list">${assocPillsHtml}</div>` : ""}
+            <div class="vault-assoc-inline" style="display: none;">
+              <input type="text" class="vault-assoc-input" placeholder="输入镜像域名或 *.example.com" />
+              <button type="button" class="btn-vault-assoc-confirm" data-domain="${escVaultHtml(item.canonicalDomain)}">添加</button>
+              <button type="button" class="btn-vault-assoc-cancel">取消</button>
+            </div>
+          </div>
+        `;
       let accountsHtml = "";
       if (accounts.length > 0) {
         accountsHtml = accounts.map((acc, accIdx) => {
           const accSafeId = `${safeDomainId}_acc_${accIdx}`;
+          const derivationBase = acc.serviceKey || item.serviceKey || item.canonicalDomain;
           return `
               <div class="vault-account-row">
                 <div class="acc-meta-left">
-                  <span class="acc-user-badge">👤 ${acc.username}</span>
+                  <span class="acc-user-badge">👤 ${escVaultHtml(acc.username)}</span>
                   <span class="acc-ver-badge">v${acc.version || 1}</span>
-                  ${acc.serviceKey ? `<span class="acc-tag-badge">🏷️ ${acc.serviceKey}</span>` : ""}
+                  ${acc.serviceKey ? `<span class="acc-tag-badge">🏷️ ${escVaultHtml(acc.serviceKey)}</span>` : ""}
                 </div>
                 <div class="acc-actions-right">
-                  <button type="button" class="btn-acc-action btn-load-to-panel" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-preset="${item.rulePreset}" data-name="${item.displayName || ""}" title="载入到下方表单">
+                  <button type="button" class="btn-acc-action btn-load-to-panel" data-domain="${escVaultHtml(item.canonicalDomain)}" data-user="${escVaultHtml(acc.username)}" data-preset="${item.rulePreset}" data-name="${escVaultHtml(item.displayName || "")}" title="载入到下方表单">
                     ⚡ 载入
                   </button>
-                  <button type="button" class="btn-acc-action btn-copy-site-pwd" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-title="${displayTitle}" data-unlock="unlock-${accSafeId}" title="直接计算并复制密码">
+                  <button type="button" class="btn-acc-action btn-copy-site-pwd" data-domain="${escVaultHtml(item.canonicalDomain)}" data-base="${escVaultHtml(derivationBase)}" data-user="${escVaultHtml(acc.username)}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-title="${escVaultHtml(displayTitle)}" data-unlock="unlock-${accSafeId}" title="直接计算并复制密码">
                     📋 复制密码
                   </button>
-                  <button type="button" class="btn-acc-action btn-peek-site-pwd" data-target="peek-${accSafeId}" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-unlock="unlock-${accSafeId}" title="查看计算密码">
+                  <button type="button" class="btn-acc-action btn-peek-site-pwd" data-target="peek-${accSafeId}" data-domain="${escVaultHtml(item.canonicalDomain)}" data-base="${escVaultHtml(derivationBase)}" data-user="${escVaultHtml(acc.username)}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-unlock="unlock-${accSafeId}" title="查看计算密码">
                     👁️
                   </button>
                 </div>
@@ -1769,8 +1968,8 @@ function setupWebDAVSync() {
                 <div class="unlock-input-wrap">
                   <input type="password" class="unlock-mantra-input cyber-input" id="input-unlock-${accSafeId}" placeholder="输入主口令..." autocomplete="off" />
                   <button type="button" class="btn-toggle-unlock-pwd" data-input="input-unlock-${accSafeId}" title="显隐">🙈</button>
-                  <button type="button" class="btn-submit-unlock" data-input="input-unlock-${accSafeId}" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-target-peek="peek-${accSafeId}" data-unlock="unlock-${accSafeId}">派生查看</button>
-                  <button type="button" class="btn-submit-unlock-copy" data-input="input-unlock-${accSafeId}" data-domain="${item.canonicalDomain}" data-user="${acc.username}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-title="${displayTitle}" data-unlock="unlock-${accSafeId}">派生复制</button>
+                  <button type="button" class="btn-submit-unlock" data-input="input-unlock-${accSafeId}" data-domain="${escVaultHtml(item.canonicalDomain)}" data-base="${escVaultHtml(derivationBase)}" data-user="${escVaultHtml(acc.username)}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-target-peek="peek-${accSafeId}" data-unlock="unlock-${accSafeId}">派生查看</button>
+                  <button type="button" class="btn-submit-unlock-copy" data-input="input-unlock-${accSafeId}" data-domain="${escVaultHtml(item.canonicalDomain)}" data-base="${escVaultHtml(derivationBase)}" data-user="${escVaultHtml(acc.username)}" data-ver="${acc.version || 1}" data-preset="${item.rulePreset}" data-title="${escVaultHtml(displayTitle)}" data-unlock="unlock-${accSafeId}">派生复制</button>
                   <button type="button" class="btn-cancel-unlock" data-unlock="unlock-${accSafeId}">✕</button>
                 </div>
               </div>
@@ -1782,19 +1981,20 @@ function setupWebDAVSync() {
         }).join("");
       } else {
         const defaultSafeId = `${safeDomainId}_default`;
+        const derivationBase = item.serviceKey || item.canonicalDomain;
         accountsHtml = `
             <div class="vault-account-row">
               <div class="acc-meta-left">
                 <span class="acc-user-badge default-key">默认凭据 (未指定账号)</span>
               </div>
               <div class="acc-actions-right">
-                <button type="button" class="btn-acc-action btn-load-to-panel" data-domain="${item.canonicalDomain}" data-user="" data-preset="${item.rulePreset}" data-name="${item.displayName || ""}" title="载入到下方表单">
+                <button type="button" class="btn-acc-action btn-load-to-panel" data-domain="${escVaultHtml(item.canonicalDomain)}" data-user="" data-preset="${item.rulePreset}" data-name="${escVaultHtml(item.displayName || "")}" title="载入到下方表单">
                   ⚡ 载入
                 </button>
-                <button type="button" class="btn-acc-action btn-copy-site-pwd" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-title="${displayTitle}" data-unlock="unlock-${defaultSafeId}" title="直接计算并复制密码">
+                <button type="button" class="btn-acc-action btn-copy-site-pwd" data-domain="${escVaultHtml(item.canonicalDomain)}" data-base="${escVaultHtml(derivationBase)}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-title="${escVaultHtml(displayTitle)}" data-unlock="unlock-${defaultSafeId}" title="直接计算并复制密码">
                   📋 复制密码
                 </button>
-                <button type="button" class="btn-acc-action btn-peek-site-pwd" data-target="peek-${defaultSafeId}" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-unlock="unlock-${defaultSafeId}" title="查看计算密码">
+                <button type="button" class="btn-acc-action btn-peek-site-pwd" data-target="peek-${defaultSafeId}" data-domain="${escVaultHtml(item.canonicalDomain)}" data-base="${escVaultHtml(derivationBase)}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-unlock="unlock-${defaultSafeId}" title="查看计算密码">
                   👁️
                 </button>
               </div>
@@ -1808,8 +2008,8 @@ function setupWebDAVSync() {
               <div class="unlock-input-wrap">
                 <input type="password" class="unlock-mantra-input cyber-input" id="input-unlock-${defaultSafeId}" placeholder="输入主口令..." autocomplete="off" />
                 <button type="button" class="btn-toggle-unlock-pwd" data-input="input-unlock-${defaultSafeId}" title="显隐">🙈</button>
-                <button type="button" class="btn-submit-unlock" data-input="input-unlock-${defaultSafeId}" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-target-peek="peek-${defaultSafeId}" data-unlock="unlock-${defaultSafeId}">派生查看</button>
-                <button type="button" class="btn-submit-unlock-copy" data-input="input-unlock-${defaultSafeId}" data-domain="${item.canonicalDomain}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-title="${displayTitle}" data-unlock="unlock-${defaultSafeId}">派生复制</button>
+                <button type="button" class="btn-submit-unlock" data-input="input-unlock-${defaultSafeId}" data-domain="${escVaultHtml(item.canonicalDomain)}" data-base="${escVaultHtml(derivationBase)}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-target-peek="peek-${defaultSafeId}" data-unlock="unlock-${defaultSafeId}">派生查看</button>
+                <button type="button" class="btn-submit-unlock-copy" data-input="input-unlock-${defaultSafeId}" data-domain="${escVaultHtml(item.canonicalDomain)}" data-base="${escVaultHtml(derivationBase)}" data-user="" data-ver="1" data-preset="${item.rulePreset}" data-title="${escVaultHtml(displayTitle)}" data-unlock="unlock-${defaultSafeId}">派生复制</button>
                 <button type="button" class="btn-cancel-unlock" data-unlock="unlock-${defaultSafeId}">✕</button>
               </div>
             </div>
@@ -1820,28 +2020,29 @@ function setupWebDAVSync() {
           `;
       }
       return `
-          <div class="vault-site-card" data-domain="${item.canonicalDomain}">
+          <div class="vault-site-card" data-domain="${escVaultHtml(item.canonicalDomain)}">
             <div class="vault-site-header">
               <div class="vault-site-info">
                 <div class="vault-site-title-row" id="title-row-${safeDomainId}">
-                  <span class="vault-site-name" id="name-label-${safeDomainId}">${hasCustomAlias ? "🏷️ " : "🌐 "}${displayTitle}</span>
-                  <button type="button" class="btn-edit-alias-inline" data-domain="${item.canonicalDomain}" data-name="${item.displayName || ""}" data-target="title-row-${safeDomainId}" title="修改站点别名/备注">✏️</button>
+                  <span class="vault-site-name" id="name-label-${safeDomainId}">${hasCustomAlias ? "🏷️ " : "🌐 "}${escVaultHtml(displayTitle)}</span>
+                  <button type="button" class="btn-edit-alias-inline" data-domain="${escVaultHtml(item.canonicalDomain)}" data-name="${escVaultHtml(item.displayName || "")}" data-target="title-row-${safeDomainId}" title="修改站点别名/备注">✏️</button>
                 </div>
-                ${subDomainText ? `<span class="vault-site-sub">🌐 ${subDomainText}</span>` : ""}
+                ${subDomainText ? `<span class="vault-site-sub">🌐 ${escVaultHtml(subDomainText)}</span>` : ""}
               </div>
               <div class="vault-site-meta">
-                <span class="vault-preset-pill">${presetName}</span>
-                <button type="button" class="btn-del-site-rule" data-del="${item.canonicalDomain}" data-target="del-bar-${safeDomainId}" title="从清单移除">✕</button>
+                <span class="vault-preset-pill">${escVaultHtml(presetName)}</span>
+                <button type="button" class="btn-del-site-rule" data-del="${escVaultHtml(item.canonicalDomain)}" data-target="del-bar-${safeDomainId}" title="从清单移除">✕</button>
               </div>
             </div>
             <!-- 删除二次确认条 (就地展开，免原生 confirm) -->
             <div class="vault-del-confirm-bar" id="del-bar-${safeDomainId}" style="display: none;">
-              <span class="del-confirm-text">确定移除 [${displayTitle}] 吗？</span>
+              <span class="del-confirm-text">确定移除 [${escVaultHtml(displayTitle)}] 吗？</span>
               <div class="del-confirm-actions">
-                <button type="button" class="btn-confirm-del-btn btn-do-del" data-del="${item.canonicalDomain}" data-name="${displayTitle}">确认移除</button>
+                <button type="button" class="btn-confirm-del-btn btn-do-del" data-del="${escVaultHtml(item.canonicalDomain)}" data-name="${escVaultHtml(displayTitle)}">确认移除</button>
                 <button type="button" class="btn-confirm-del-btn btn-cancel-del" data-target="del-bar-${safeDomainId}">取消</button>
               </div>
             </div>
+            ${assocDrawerHtml}
             <div class="vault-accounts-box">
               ${accountsHtml}
             </div>
@@ -1890,7 +2091,7 @@ function setupWebDAVSync() {
         const mantra = getSessionMasterMantra();
         const unlockId = btn.getAttribute("data-unlock") || "";
         const unlockEl = unlockId ? document.getElementById(unlockId) : null;
-        const dom = btn.getAttribute("data-domain") || "";
+        const dom = btn.getAttribute("data-base") || btn.getAttribute("data-domain") || "";
         const user = btn.getAttribute("data-user") || "";
         const ver = parseInt(btn.getAttribute("data-ver") || "1", 10);
         const preset = btn.getAttribute("data-preset") || "standard-16";
@@ -1927,7 +2128,7 @@ function setupWebDAVSync() {
         const mantra = getSessionMasterMantra();
         const unlockId = btn.getAttribute("data-unlock") || "";
         const unlockEl = unlockId ? document.getElementById(unlockId) : null;
-        const dom = btn.getAttribute("data-domain") || "";
+        const dom = btn.getAttribute("data-base") || btn.getAttribute("data-domain") || "";
         const user = btn.getAttribute("data-user") || "";
         const ver = parseInt(btn.getAttribute("data-ver") || "1", 10);
         const preset = btn.getAttribute("data-preset") || "standard-16";
@@ -2007,7 +2208,7 @@ function setupWebDAVSync() {
         }
         setSessionMasterMantra(val);
         row.style.display = "none";
-        const dom = btnUnlockPeek.getAttribute("data-domain") || "";
+        const dom = btnUnlockPeek.getAttribute("data-base") || btnUnlockPeek.getAttribute("data-domain") || "";
         const user = btnUnlockPeek.getAttribute("data-user") || "";
         const ver = parseInt(btnUnlockPeek.getAttribute("data-ver") || "1", 10);
         const preset = btnUnlockPeek.getAttribute("data-preset") || "standard-16";
@@ -2044,7 +2245,7 @@ function setupWebDAVSync() {
         }
         setSessionMasterMantra(val);
         row.style.display = "none";
-        const dom = btnUnlockCopy.getAttribute("data-domain") || "";
+        const dom = btnUnlockCopy.getAttribute("data-base") || btnUnlockCopy.getAttribute("data-domain") || "";
         const user = btnUnlockCopy.getAttribute("data-user") || "";
         const ver = parseInt(btnUnlockCopy.getAttribute("data-ver") || "1", 10);
         const preset = btnUnlockCopy.getAttribute("data-preset") || "standard-16";
@@ -2137,6 +2338,65 @@ function setupWebDAVSync() {
         const targetBarId = btn.getAttribute("data-target") || "";
         const targetBar = document.getElementById(targetBarId);
         if (targetBar) targetBar.style.display = "none";
+      });
+    });
+    syncedRulesList.querySelectorAll(".vault-assoc-drawer").forEach((drawer) => {
+      const domain = drawer.getAttribute("data-card-domain") || "";
+      const btnAdd = drawer.querySelector(".btn-vault-add-assoc");
+      const inlineBox = drawer.querySelector(".vault-assoc-inline");
+      const inputEl = drawer.querySelector(".vault-assoc-input");
+      const btnConfirm = drawer.querySelector(".btn-vault-assoc-confirm");
+      const btnCancel = drawer.querySelector(".btn-vault-assoc-cancel");
+      const submitAssocAdd = () => {
+        const rawAlias = (inputEl == null ? void 0 : inputEl.value.trim()) || "";
+        const res = addManifestDomainAlias(domain, rawAlias);
+        if (res.ok) {
+          renderRulesList();
+          refreshStatusView();
+          showToast(res.message || "已添加关联网站");
+        } else {
+          showToast(`⚠️ ${res.message || "添加失败"}`);
+          inputEl == null ? void 0 : inputEl.focus();
+        }
+      };
+      btnAdd == null ? void 0 : btnAdd.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (!inlineBox) return;
+        const hidden = inlineBox.style.display === "none" || !inlineBox.style.display;
+        inlineBox.style.display = hidden ? "flex" : "none";
+        if (hidden) inputEl == null ? void 0 : inputEl.focus();
+      });
+      btnCancel == null ? void 0 : btnCancel.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (inlineBox) inlineBox.style.display = "none";
+        if (inputEl) inputEl.value = "";
+      });
+      btnConfirm == null ? void 0 : btnConfirm.addEventListener("click", (e) => {
+        e.stopPropagation();
+        submitAssocAdd();
+      });
+      inputEl == null ? void 0 : inputEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          submitAssocAdd();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          if (inlineBox) inlineBox.style.display = "none";
+        }
+      });
+      drawer.querySelectorAll(".btn-vault-remove-assoc").forEach((rmBtn) => {
+        rmBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const alias = rmBtn.getAttribute("data-alias") || "";
+          if (!alias) return;
+          if (removeManifestDomainAlias(domain, alias)) {
+            renderRulesList();
+            refreshStatusView();
+            showToast(`已取消关联 [${alias}]`);
+          } else {
+            showToast("取消关联失败");
+          }
+        });
       });
     });
   }

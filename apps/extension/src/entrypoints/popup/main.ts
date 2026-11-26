@@ -18,6 +18,9 @@ import {
   updateAccountVersion,
   getAllAccountsManifest,
   linkDomainToExisting,
+  addDomainAlias,
+  removeDomainAlias,
+  matchDomainAlias,
   getDomainDisplayName,
   setDomainDisplayName,
   type AccountRecord,
@@ -1486,55 +1489,84 @@ document.addEventListener('DOMContentLoaded', async () => {
       const isCurrentSite = group.domain.toLowerCase() === currentDomain.toLowerCase() ||
                             group.unicodeDomain.toLowerCase() === currentDomain.toLowerCase();
 
+      const escapeHtml = (raw: string): string =>
+        raw
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+
+      const currentUnicode = toUnicodeDomain(currentDomain).toLowerCase();
+      const assocDomains = Array.isArray(group.associatedDomains) ? group.associatedDomains : [];
+      const isAlreadyLinkedToCurrent = !isCurrentSite && assocDomains.some((pattern) =>
+        matchDomainAlias(pattern, currentDomain.toLowerCase()) ||
+        matchDomainAlias(pattern, currentUnicode)
+      );
+
       const hasCustomName = Boolean(group.displayName && group.displayName !== group.unicodeDomain && group.displayName !== group.domain);
-      const displayTitle = hasCustomName ? group.displayName : group.unicodeDomain;
+      const displayTitle = hasCustomName ? group.displayName! : group.unicodeDomain;
       const subTitle = hasCustomName ? group.unicodeDomain : '';
 
       const serviceTag = (group.serviceKey && group.serviceKey !== group.displayName && group.serviceKey !== group.domain && group.serviceKey !== group.unicodeDomain)
-        ? `<span class="alias-tag-badge" style="margin-left: 4px;">🏷️ ${group.serviceKey}</span>`
+        ? `<span class="alias-tag-badge" style="margin-left: 4px;">🏷️ ${escapeHtml(group.serviceKey)}</span>`
         : '';
 
-      const assocDrawerHtml = (group.associatedDomains && group.associatedDomains.length > 0)
-        ? `
-          <div class="assoc-domains-drawer">
-            <div class="assoc-domains-header">
-              <span class="assoc-title">🔗 已关联镜像域名 (${group.associatedDomains.length})</span>
-            </div>
-            <div class="assoc-domains-list">
-              ${group.associatedDomains.map((d) => `<span class="assoc-domain-pill" title="${d}">${d}</span>`).join('')}
-            </div>
+      const assocPillsHtml = assocDomains.map((d) => {
+        const safeDomain = escapeHtml(d);
+        return `
+          <span class="assoc-domain-pill" title="${safeDomain}">
+            <span class="assoc-domain-name">${safeDomain}</span>
+            <button type="button" class="btn-remove-assoc-domain" data-alias="${safeDomain}" title="取消关联 ${safeDomain}" aria-label="取消关联 ${safeDomain}">×</button>
+          </span>
+        `;
+      }).join('');
+
+      const assocDrawerHtml = `
+        <div class="assoc-domains-drawer${assocDomains.length === 0 ? ' is-empty' : ''}">
+          <div class="assoc-domains-header">
+            <span class="assoc-title">${assocDomains.length > 0 ? `🔗 关联网站 (${assocDomains.length})` : '🔗 关联网站：暂无'}</span>
+            <button type="button" class="btn-add-assoc-domain" title="为当前记录手动添加关联镜像域名或通配符">+ 添加关联</button>
           </div>
-        `
-        : '';
+          ${assocDomains.length > 0 ? `<div class="assoc-domains-list">${assocPillsHtml}</div>` : ''}
+          <div class="assoc-add-inline" style="display: none;">
+            <input type="text" class="assoc-add-input" placeholder="输入镜像域名或通配符，如 *.example.com" />
+            <button type="button" class="btn-assoc-confirm">添加</button>
+            <button type="button" class="btn-assoc-cancel">取消</button>
+          </div>
+        </div>
+      `;
 
       card.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px dashed var(--color-border);">
           <div style="display: flex; flex-direction: column; gap: 2px; overflow: hidden; min-width: 0; flex: 1; margin-right: 6px;">
             <div class="manifest-domain-title-area" style="display: flex; align-items: center; gap: 4px; overflow: hidden;">
               <span style="font-size: 14px; flex-shrink: 0;">${hasCustomName ? '🏷️' : '🌐'}</span>
-              <span class="manifest-domain-title-text" style="font-weight: 700; font-size: 13px; color: var(--color-text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;" title="双击或点击 ✏️ 修改备注名称" data-domain="${group.domain}" data-alias="${group.displayName || ''}">
-                ${displayTitle}
+              <span class="manifest-domain-title-text" style="font-weight: 700; font-size: 13px; color: var(--color-text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;" title="双击或点击 ✏️ 修改备注名称" data-domain="${escapeHtml(group.domain)}" data-alias="${escapeHtml(group.displayName || '')}">
+                ${escapeHtml(displayTitle)}
               </span>
-              <button type="button" class="btn-edit-alias-icon" data-domain="${group.domain}" data-alias="${group.displayName || ''}" title="点击修改备注名称">
+              <button type="button" class="btn-edit-alias-icon" data-domain="${escapeHtml(group.domain)}" data-alias="${escapeHtml(group.displayName || '')}" title="点击修改备注名称">
                 ✏️
               </button>
             </div>
             ${(subTitle || serviceTag) ? `
               <div style="font-size: 10px; color: var(--color-text-dim); margin-left: 20px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
-                ${subTitle ? `<span>🌐 ${subTitle}</span>` : ''}
+                ${subTitle ? `<span>🌐 ${escapeHtml(subTitle)}</span>` : ''}
                 ${serviceTag}
               </div>
             ` : ''}
           </div>
           <div style="display: flex; gap: 6px; flex-shrink: 0; align-items: center;">
-            ${!isCurrentSite ? `
-              <button type="button" class="btn-link-here btn-xs-primary" style="padding: 3px 8px; font-size: 10.5px; cursor: pointer;" title="将当前打开的网页关联为该站点的镜像别名">
-                🔗 关联当前网页
-              </button>
-            ` : ''}
             ${isCurrentSite ? `
               <span class="manifest-current-badge" title="当前主面板正在查看此站点">✓ 当前正在查看</span>
             ` : `
+              ${isAlreadyLinkedToCurrent ? `
+                <span class="manifest-linked-badge" title="当前打开的网页已关联至此站点">🔗 已关联当前站</span>
+              ` : `
+                <button type="button" class="btn-link-here btn-xs-primary" style="padding: 3px 8px; font-size: 10.5px; cursor: pointer;" title="将当前打开的网页关联为该站点的镜像别名">
+                  🔗 关联当前网页
+                </button>
+              `}
               <button type="button" class="btn-switch-domain btn-load-panel" title="将此站点的账号与规则载入主界面进行派生与管理">
                 🖥️ 载入主面板
               </button>
@@ -1660,16 +1692,83 @@ document.addEventListener('DOMContentLoaded', async () => {
         showToast(`已将 [${displayTitle}] 载入主面板`);
       });
 
-      // 关联当前网页
+      // 关联当前网页（原地刷新清单列表，立刻呈现新增的关联镜像标签）
       card.querySelector('.btn-link-here')?.addEventListener('click', async () => {
         const ok = await linkDomainToExisting(currentDomain, group.domain);
         if (ok) {
           await loadDomainAccounts();
-          closeManifestModal();
+          await renderAllManifest(inputSearchManifest?.value || '');
           showToast(`已成功将当前站点 [${toUnicodeDomain(currentDomain)}] 关联至 [${displayTitle}]！`);
         } else {
           showToast('关联失败');
         }
+      });
+
+      // 就地添加/删除关联域名交互
+      const btnAddAssoc = card.querySelector('.btn-add-assoc-domain') as HTMLButtonElement | null;
+      const assocAddInline = card.querySelector('.assoc-add-inline') as HTMLElement | null;
+      const assocAddInput = card.querySelector('.assoc-add-input') as HTMLInputElement | null;
+      const btnAssocConfirm = card.querySelector('.btn-assoc-confirm') as HTMLButtonElement | null;
+      const btnAssocCancel = card.querySelector('.btn-assoc-cancel') as HTMLButtonElement | null;
+
+      const submitAssocAdd = async () => {
+        const rawInput = assocAddInput?.value || '';
+        const res = await addDomainAlias(group.domain, rawInput);
+        if (res.ok) {
+          await loadDomainAccounts();
+          await renderAllManifest(inputSearchManifest?.value || '');
+          showToast(res.message || '已添加关联域名');
+        } else {
+          showToast(`⚠️ ${res.message || '添加失败'}`);
+          assocAddInput?.focus();
+        }
+      };
+
+      btnAddAssoc?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!assocAddInline) return;
+        const isHidden = assocAddInline.style.display === 'none' || !assocAddInline.style.display;
+        assocAddInline.style.display = isHidden ? 'flex' : 'none';
+        if (isHidden) {
+          assocAddInput?.focus();
+        }
+      });
+
+      btnAssocCancel?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (assocAddInline) assocAddInline.style.display = 'none';
+        if (assocAddInput) assocAddInput.value = '';
+      });
+
+      btnAssocConfirm?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        submitAssocAdd();
+      });
+
+      assocAddInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitAssocAdd();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          if (assocAddInline) assocAddInline.style.display = 'none';
+        }
+      });
+
+      card.querySelectorAll('.btn-remove-assoc-domain').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const aliasToRemove = (btn as HTMLElement).getAttribute('data-alias') || '';
+          if (!aliasToRemove) return;
+          const removed = await removeDomainAlias(group.domain, aliasToRemove);
+          if (removed) {
+            await loadDomainAccounts();
+            await renderAllManifest(inputSearchManifest?.value || '');
+            showToast(`已取消关联 [${aliasToRemove}]`);
+          } else {
+            showToast('取消关联失败');
+          }
+        });
       });
 
       manifestDomainsContainer.appendChild(card);

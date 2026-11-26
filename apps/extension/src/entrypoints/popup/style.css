@@ -1719,24 +1719,51 @@ body.is-unlocked .enclave-badge {
 /* 关联多域名详情抽屉与徽章 */
 .assoc-domains-drawer {
   margin-top: 6px;
-  padding: 5px 8px;
+  padding: 6px 8px;
   background: var(--color-surface-subtle);
   border: 1px solid var(--color-border);
   border-radius: 6px;
   font-size: 10px;
 }
 
+.assoc-domains-drawer.is-empty {
+  border-style: dashed;
+  opacity: 0.92;
+}
+
 .assoc-domains-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 4px;
+  gap: 8px;
+}
+
+.assoc-domains-drawer:not(.is-empty) .assoc-domains-header {
+  margin-bottom: 5px;
 }
 
 .assoc-title {
   color: var(--color-text-muted);
   font-weight: 600;
   font-size: 10px;
+}
+
+.btn-add-assoc-domain {
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px dashed rgba(13, 148, 136, 0.45);
+  background: rgba(13, 148, 136, 0.08);
+  color: var(--color-primary);
+  font-size: 9.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-add-assoc-domain:hover {
+  background: var(--color-primary);
+  border-style: solid;
+  color: #ffffff;
 }
 
 .assoc-domains-list {
@@ -1746,7 +1773,9 @@ body.is-unlocked .enclave-badge {
 }
 
 .assoc-domain-pill {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 1px 6px;
   border-radius: 4px;
   background: rgba(13, 148, 136, 0.1);
@@ -1755,6 +1784,88 @@ body.is-unlocked .enclave-badge {
   font-family: var(--font-mono);
   font-size: 9.5px;
   white-space: nowrap;
+}
+
+.assoc-domain-name {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn-remove-assoc-domain {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-remove-assoc-domain:hover {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ef4444;
+}
+
+.assoc-add-inline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.assoc-add-input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 7px;
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  color: var(--color-text-main);
+  background: var(--color-surface);
+  border: 1px solid var(--color-primary);
+  border-radius: 4px;
+  outline: none;
+}
+
+.btn-assoc-confirm,
+.btn-assoc-cancel {
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-assoc-confirm {
+  border: none;
+  background: var(--color-primary);
+  color: #ffffff;
+}
+
+.btn-assoc-cancel {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+}
+
+.manifest-linked-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: rgba(13, 148, 136, 0.12);
+  border: 1px solid rgba(13, 148, 136, 0.3);
 }
 
 /* 载入主面板按钮与当前激活标签 */

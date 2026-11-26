@@ -137,3 +137,46 @@ test('CvRDT - 正确合并多端新增与更新条目', () => {
   assert.strictEqual(merged.domains['a.com'].accounts['u1'].username, 'u1');
   assert.strictEqual(merged.domains['b.com'].accounts['u2'].username, 'u2');
 });
+
+test('CvRDT - 同一站点双端同步应合并 associatedDomains 与账号 aliases 并集', () => {
+  const local: ExtensionManifest = {
+    schemaVersion: 1,
+    canaryHash: 'H1',
+    domains: {
+      'site.com': {
+        canonicalDomain: 'site.com',
+        displayName: 'Site',
+        rulePreset: 'standard-16',
+        serviceKey: 'site.com',
+        associatedDomains: ['m1.site.com'],
+        accounts: {
+          'u1': { username: 'u1', version: 1, updatedAt: 100, isDeleted: false, aliases: ['m1.site.com'] }
+        },
+        updatedAt: 100
+      }
+    },
+    updatedAt: 100
+  };
+
+  const remote: ExtensionManifest = {
+    schemaVersion: 1,
+    canaryHash: 'H1',
+    domains: {
+      'site.com': {
+        canonicalDomain: 'site.com',
+        displayName: 'Site',
+        rulePreset: 'standard-16',
+        associatedDomains: ['m2.site.com'],
+        accounts: {
+          'u1': { username: 'u1', version: 1, updatedAt: 200, isDeleted: false, aliases: ['m2.site.com'] }
+        },
+        updatedAt: 200
+      }
+    },
+    updatedAt: 200
+  };
+
+  const merged = mergeManifests(local, remote);
+  assert.deepStrictEqual(merged.domains['site.com'].associatedDomains, ['m1.site.com', 'm2.site.com']);
+  assert.deepStrictEqual(merged.domains['site.com'].accounts['u1'].aliases, ['m1.site.com', 'm2.site.com']);
+});

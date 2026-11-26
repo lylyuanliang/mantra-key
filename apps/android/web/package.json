@@ -1,6 +1,6 @@
 {
   "name": "@mantra-key/android-web",
-  "version": "0.1.4.202611261720",
+  "version": "0.1.5.202611261815",
   "private": true,
   "type": "module",
   "scripts": {

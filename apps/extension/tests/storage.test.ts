@@ -33,6 +33,9 @@ import {
   getAccountsForDomain,
   getAllAccountsManifest,
   linkDomainToExisting,
+  addDomainAlias,
+  removeDomainAlias,
+  normalizeDomainAliasInput,
   matchDomainAlias,
   setDomainDisplayName,
   getDomainDisplayName,
@@ -119,4 +122,30 @@ test('站点自定义别名 (DisplayName) 与多域名关联详情 (associatedDo
   // 验证 associatedDomains 包含了前面 link 的 new-flight-gw.org 以及 aliases 中的 cleanip.io
   assert.ok(group.associatedDomains.length >= 1);
   assert.ok(group.associatedDomains.some((d) => d.includes('cleanip.io') || d.includes('new-flight-gw.org')));
+});
+
+test('addDomainAlias 与 removeDomainAlias 应支持增删关联镜像网站并同步清单显示', async () => {
+  assert.strictEqual(normalizeDomainAliasInput('https://Mirror.Example.com:8443/login'), 'mirror.example.com');
+  assert.strictEqual(normalizeDomainAliasInput('*.Example.com'), '*.example.com');
+
+  const added = await addDomainAlias('三毛机场.com', 'https://node2.三毛机场.com/auth');
+  assert.strictEqual(added.ok, true);
+  assert.strictEqual(added.alias, 'node2.三毛机场.com');
+
+  let manifest = await getAllAccountsManifest();
+  let group = manifest.find((g) => g.unicodeDomain.includes('三毛机场'));
+  assert.ok(group?.associatedDomains.includes('node2.三毛机场.com'));
+
+  // 移除手动添加的域名别名
+  const removedManual = await removeDomainAlias('三毛机场.com', 'node2.三毛机场.com');
+  assert.strictEqual(removedManual, true);
+
+  // 移除通过 linkDomainToExisting 自动关联的镜像站点，应同步解绑避免 serviceKey 再次聚合回显
+  const removedLinked = await removeDomainAlias('三毛机场.com', 'new-flight-gw.org');
+  assert.strictEqual(removedLinked, true);
+
+  manifest = await getAllAccountsManifest();
+  group = manifest.find((g) => g.unicodeDomain.includes('三毛机场'));
+  assert.strictEqual(group?.associatedDomains.includes('node2.三毛机场.com'), false);
+  assert.strictEqual(group?.associatedDomains.includes('new-flight-gw.org'), false);
 });

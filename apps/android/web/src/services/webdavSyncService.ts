@@ -245,6 +245,273 @@ export function removeDomainRule(canonicalDomain: string): MantraManifest {
   return manifest;
 }
 
+function decodePunycodePart(input: string): string {
+  const maxInt = 2147483647;
+  const base = 36;
+  const tMin = 1;
+  const tMax = 26;
+  const skew = 38;
+  const damp = 700;
+  let n = 128;
+  let i = 0;
+  let bias = 72;
+
+  const adapt = (delta: number, numPoints: number, firstTime: boolean): number => {
+    let k = 0;
+    let d = firstTime ? Math.floor(delta / damp) : delta >> 1;
+    d += Math.floor(d / numPoints);
+    for (; d > ((base - tMin) * tMax) >> 1; k += base) {
+      d = Math.floor(d / (base - tMin));
+    }
+    return Math.floor(k + ((base - tMin + 1) * d) / (d + skew));
+  };
+
+  const decodeDigit = (cp: number): number =>
+    cp - 48 < 10 ? cp - 22 : cp - 65 < 26 ? cp - 65 : cp - 97 < 26 ? cp - 97 : base;
+
+  const output: number[] = [];
+  const basic = input.lastIndexOf('-');
+  if (basic > 0) {
+    for (let j = 0; j < basic; ++j) output.push(input.charCodeAt(j));
+  }
+
+  let index = basic > 0 ? basic + 1 : 0;
+  while (index < input.length) {
+    const oldi = i;
+    let w = 1;
+    for (let k = base; ; k += base) {
+      if (index >= input.length) return input;
+      const digit = decodeDigit(input.charCodeAt(index++));
+      if (digit >= base) return input;
+      if (digit > Math.floor((maxInt - i) / w)) return input;
+      i += digit * w;
+      const t = k <= bias ? tMin : k >= bias + tMax ? tMax : k - bias;
+      if (digit < t) break;
+      if (w > Math.floor(maxInt / (base - t))) return input;
+      w *= base - t;
+    }
+    const out = output.length + 1;
+    bias = adapt(i - oldi, out, oldi === 0);
+    if (Math.floor(i / out) > maxInt - n) return input;
+    n += Math.floor(i / out);
+    i %= out;
+    output.splice(i++, 0, n);
+  }
+  return String.fromCodePoint(...output);
+}
+
+/**
+ * 将 Punycode 域名转为人类可读 Unicode 文本
+ */
+export function toUnicodeDomain(domain: string): string {
+  if (!domain || typeof domain !== 'string') return '';
+  return domain
+    .split('.')
+    .map((part) => (part.startsWith('xn--') ? decodePunycodePart(part.slice(4)) : part))
+    .join('.');
+}
+
+/**
+ * 规范化关联域名/通配符输入
+ */
+export function normalizeAliasInput(raw: string): string {
+  if (!raw || typeof raw !== 'string') return '';
+  let value = raw.trim();
+  if (!value) return '';
+
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      value = new URL(value).hostname;
+    } catch {
+      value = value.replace(/^https?:\/\//i, '');
+    }
+  } else {
+    value = value.split('/')[0];
+  }
+
+  value = value.replace(/:\d+$/, '').trim().toLowerCase();
+  if (!value || value.includes(' ')) return '';
+  return toUnicodeDomain(value);
+}
+
+/**
+ * 聚合站点关联的全部镜像域名明细（包含 associatedDomains、账号 aliases 与同 serviceKey 关联站点）
+ */
+export function getEntryAssociatedDomains(manifest: MantraManifest, entry: DomainRuleEntry): string[] {
+  const selfRaw = (entry.canonicalDomain || '').trim().toLowerCase();
+  const selfUnicode = toUnicodeDomain(selfRaw);
+  const result = new Set<string>();
+
+  const addIfOther = (raw: string) => {
+    const clean = toUnicodeDomain((raw || '').trim().toLowerCase());
+    if (clean && clean !== selfRaw && clean !== selfUnicode) {
+      result.add(clean);
+    }
+  };
+
+  if (Array.isArray(entry.associatedDomains)) {
+    entry.associatedDomains.forEach(addIfOther);
+  }
+
+  const serviceKeys = new Set<string>();
+  if (entry.serviceKey) serviceKeys.add(entry.serviceKey.trim().toLowerCase());
+
+  for (const acc of Object.values(entry.accounts || {})) {
+    if (acc.isDeleted) continue;
+    if (acc.serviceKey) serviceKeys.add(acc.serviceKey.trim().toLowerCase());
+    if (Array.isArray(acc.aliases)) {
+      acc.aliases.forEach(addIfOther);
+    }
+  }
+
+  if (serviceKeys.size > 0) {
+    for (const [otherKey, otherEntry] of Object.entries(manifest.domains || {})) {
+      if (otherKey.toLowerCase() === selfRaw) continue;
+      const otherKeys: string[] = [];
+      if (otherEntry.serviceKey) otherKeys.push(otherEntry.serviceKey.trim().toLowerCase());
+      for (const acc of Object.values(otherEntry.accounts || {})) {
+        if (!acc.isDeleted && acc.serviceKey) {
+          otherKeys.push(acc.serviceKey.trim().toLowerCase());
+        }
+      }
+      if (otherKeys.some((sk) => serviceKeys.has(sk))) {
+        addIfOther(otherEntry.canonicalDomain || otherKey);
+      }
+    }
+  }
+
+  return Array.from(result);
+}
+
+/**
+ * 为移动端清单站点添加一个关联镜像域名或通配符，并同步写入 aliases 以便 WebDAV 跨端同步
+ */
+export function addManifestDomainAlias(
+  canonicalDomain: string,
+  rawAlias: string
+): { ok: boolean; alias?: string; message?: string } {
+  const manifest = getLocalManifest();
+  const domainKey = canonicalDomain.trim().toLowerCase();
+  const entry = manifest.domains[domainKey];
+  const alias = normalizeAliasInput(rawAlias);
+
+  if (!entry) {
+    return { ok: false, message: '未找到该站点记录' };
+  }
+  if (!alias) {
+    return { ok: false, message: '请输入有效的关联域名或通配符' };
+  }
+  if (alias === domainKey || alias === toUnicodeDomain(domainKey)) {
+    return { ok: false, message: '无需关联当前站点自身' };
+  }
+
+  const now = Date.now();
+  const assocSet = new Set<string>(
+    (entry.associatedDomains || []).map((d) => toUnicodeDomain(d.trim().toLowerCase()))
+  );
+  const alreadyExists = assocSet.has(alias);
+  assocSet.add(alias);
+
+  const updatedAccounts = { ...(entry.accounts || {}) };
+  for (const [userKey, acc] of Object.entries(updatedAccounts)) {
+    if (acc.isDeleted) continue;
+    const accAliases = new Set<string>(
+      (acc.aliases || []).map((d) => toUnicodeDomain(d.trim().toLowerCase()))
+    );
+    accAliases.add(alias);
+    updatedAccounts[userKey] = {
+      ...acc,
+      serviceKey: acc.serviceKey || entry.serviceKey || domainKey,
+      aliases: Array.from(accAliases),
+      updatedAt: now,
+    };
+  }
+
+  manifest.domains[domainKey] = {
+    ...entry,
+    serviceKey: entry.serviceKey || domainKey,
+    associatedDomains: Array.from(assocSet),
+    accounts: updatedAccounts,
+    updatedAt: now,
+  };
+  manifest.updatedAt = now;
+  saveLocalManifest(manifest);
+
+  return {
+    ok: true,
+    alias,
+    message: alreadyExists ? `关联域名 [${alias}] 已存在` : `已添加关联域名 [${alias}]`,
+  };
+}
+
+/**
+ * 从移动端清单站点移除一个关联域名/通配符（同步清理账号 aliases 与反向同 serviceKey 关联）
+ */
+export function removeManifestDomainAlias(canonicalDomain: string, rawAlias: string): boolean {
+  const manifest = getLocalManifest();
+  const domainKey = canonicalDomain.trim().toLowerCase();
+  const domainUnicode = toUnicodeDomain(domainKey);
+  const entry = manifest.domains[domainKey];
+  const targetAlias = normalizeAliasInput(rawAlias);
+
+  if (!entry || !targetAlias) return false;
+  const now = Date.now();
+  const isTarget = (candidate: string) =>
+    toUnicodeDomain(candidate.trim().toLowerCase()) === targetAlias;
+
+  const nextAssoc = (entry.associatedDomains || []).filter((d) => !isTarget(d));
+  const nextAccounts: Record<string, AccountEntry> = {};
+  for (const [userKey, acc] of Object.entries(entry.accounts || {})) {
+    nextAccounts[userKey] = {
+      ...acc,
+      aliases: Array.isArray(acc.aliases) ? acc.aliases.filter((d) => !isTarget(d)) : undefined,
+      updatedAt: now,
+    };
+  }
+
+  manifest.domains[domainKey] = {
+    ...entry,
+    associatedDomains: nextAssoc.length > 0 ? nextAssoc : undefined,
+    accounts: nextAccounts,
+    updatedAt: now,
+  };
+
+  // 若被取消关联的域名也在本地清单中且共享相同 serviceKey，同步解除共享关联防止再次回显
+  for (const [otherKey, otherEntry] of Object.entries(manifest.domains)) {
+    if (otherKey.toLowerCase() === domainKey || !isTarget(otherKey)) continue;
+    const cleanedOtherAssoc = (otherEntry.associatedDomains || []).filter((d) => {
+      const n = toUnicodeDomain(d.trim().toLowerCase());
+      return n !== domainKey && n !== domainUnicode;
+    });
+    const otherAccs: Record<string, AccountEntry> = {};
+    for (const [uKey, acc] of Object.entries(otherEntry.accounts || {})) {
+      const cleanedAliases = Array.isArray(acc.aliases)
+        ? acc.aliases.filter((d) => {
+            const n = toUnicodeDomain(d.trim().toLowerCase());
+            return n !== domainKey && n !== domainUnicode;
+          })
+        : undefined;
+      otherAccs[uKey] = {
+        ...acc,
+        aliases: cleanedAliases,
+        serviceKey: acc.serviceKey === (entry.serviceKey || domainKey) ? otherKey : acc.serviceKey,
+        updatedAt: now,
+      };
+    }
+    manifest.domains[otherKey] = {
+      ...otherEntry,
+      serviceKey: otherEntry.serviceKey === (entry.serviceKey || domainKey) ? otherKey : otherEntry.serviceKey,
+      associatedDomains: cleanedOtherAssoc.length > 0 ? cleanedOtherAssoc : undefined,
+      accounts: otherAccs,
+      updatedAt: now,
+    };
+  }
+
+  manifest.updatedAt = now;
+  saveLocalManifest(manifest);
+  return true;
+}
+
 /**
  * 状态型 CRDT (CvRDT) 合并算子
  * 并行合并本地与远程 Manifest，根据时间戳与集合并集自动消除冲突
@@ -273,19 +540,38 @@ export function mergeManifests(local: MantraManifest, remote: MantraManifest): M
         if (!localAcc) {
           combinedAccounts[userKey] = remoteAcc;
         } else {
+          const mergedAliases = Array.from(new Set([
+            ...(Array.isArray(localAcc.aliases) ? localAcc.aliases : []),
+            ...(Array.isArray(remoteAcc.aliases) ? remoteAcc.aliases : []),
+          ]));
           // 账号版本号优先，其次按修改时间戳
           if (remoteAcc.version > localAcc.version || (remoteAcc.version === localAcc.version && remoteAcc.updatedAt > localAcc.updatedAt)) {
-            combinedAccounts[userKey] = remoteAcc;
+            combinedAccounts[userKey] = {
+              ...remoteAcc,
+              serviceKey: remoteAcc.serviceKey || localAcc.serviceKey,
+              aliases: mergedAliases.length > 0 ? mergedAliases : undefined,
+            };
+          } else {
+            combinedAccounts[userKey] = {
+              ...localAcc,
+              serviceKey: localAcc.serviceKey || remoteAcc.serviceKey,
+              aliases: mergedAliases.length > 0 ? mergedAliases : undefined,
+            };
           }
         }
       }
+
+      const mergedAssoc = Array.from(new Set([
+        ...(Array.isArray(localDomain.associatedDomains) ? localDomain.associatedDomains : []),
+        ...(Array.isArray(remoteDomain.associatedDomains) ? remoteDomain.associatedDomains : []),
+      ]));
 
       merged.domains[domainKey] = {
         canonicalDomain: newerDomain.canonicalDomain,
         displayName: newerDomain.displayName || localDomain.displayName,
         rulePreset: newerDomain.rulePreset || localDomain.rulePreset,
         serviceKey: newerDomain.serviceKey || localDomain.serviceKey,
-        associatedDomains: newerDomain.associatedDomains || localDomain.associatedDomains,
+        associatedDomains: mergedAssoc.length > 0 ? mergedAssoc : undefined,
         accounts: combinedAccounts,
         updatedAt: Math.max(localDomain.updatedAt, remoteDomain.updatedAt)
       };

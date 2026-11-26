@@ -790,6 +790,147 @@
   border-color: rgba(38, 51, 77, 0.6);
 }
 
+.bubble-assoc-drawer {
+  padding: 5px 7px;
+  border-radius: 5px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  font-size: 9.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bubble-assoc-drawer.is-empty {
+  border-style: dashed;
+}
+
+.mantra-bubble-container[data-theme="dark"] .bubble-assoc-drawer {
+  background: #10131a;
+  border-color: rgba(38, 51, 77, 0.75);
+}
+
+.bubble-assoc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.bubble-assoc-title {
+  font-weight: 600;
+  color: #64748b;
+}
+
+.mantra-bubble-container[data-theme="dark"] .bubble-assoc-title {
+  color: #94a3b8;
+}
+
+.btn-bubble-add-assoc {
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px dashed rgba(13, 148, 136, 0.45);
+  background: rgba(13, 148, 136, 0.08);
+  color: #0d9488;
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mantra-bubble-container[data-theme="dark"] .btn-bubble-add-assoc {
+  border-color: rgba(16, 185, 129, 0.5);
+  background: rgba(16, 185, 129, 0.12);
+  color: #4edea3;
+}
+
+.bubble-assoc-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.bubble-assoc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(13, 148, 136, 0.1);
+  border: 1px solid rgba(13, 148, 136, 0.25);
+  color: #0d9488;
+  font-family: var(--mantra-font-mono);
+  font-size: 9px;
+}
+
+.mantra-bubble-container[data-theme="dark"] .bubble-assoc-pill {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #4edea3;
+}
+
+.btn-bubble-remove-assoc {
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  font-size: 10px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.btn-bubble-remove-assoc:hover {
+  opacity: 1;
+  color: #ef4444;
+}
+
+.bubble-assoc-inline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.bubble-assoc-input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid #0d9488;
+  background: #ffffff;
+  color: #0f172a;
+  font-family: var(--mantra-font-mono);
+  font-size: 10px;
+  outline: none;
+}
+
+.mantra-bubble-container[data-theme="dark"] .bubble-assoc-input {
+  border-color: #10b981;
+  background: #1d2026;
+  color: #e1e2eb;
+}
+
+.btn-bubble-assoc-confirm,
+.btn-bubble-assoc-cancel {
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-size: 9.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-bubble-assoc-confirm {
+  border: none;
+  background: #0d9488;
+  color: #ffffff;
+}
+
+.btn-bubble-assoc-cancel {
+  border: 1px solid #cbd5e1;
+  background: transparent;
+  color: #64748b;
+}
+
 /* ========================================================== */
 /* 3. 顶部悬浮改密安全确认横幅 (Floating Pending Commit Banner) */
 /* ========================================================== */

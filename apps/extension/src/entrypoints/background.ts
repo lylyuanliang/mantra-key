@@ -15,6 +15,8 @@ import {
   updateAccountVersion,
   getAllAccountsManifest,
   linkDomainToExisting,
+  addDomainAlias,
+  removeDomainAlias,
   setDomainDisplayName,
 } from '../utils/storage';
 import { deriveSitePassword, RulePreset } from '../utils/crypto';
@@ -392,6 +394,30 @@ export default defineBackground(() => {
         sendResponse({ status: ok ? 'ok' : 'error', ok });
       }).catch((err) => {
         sendResponse({ status: 'error', message: err?.message });
+      });
+      return true;
+    }
+
+    // 8.3b 为指定站点添加关联镜像域名/通配符
+    if (action === 'ADD_DOMAIN_ALIAS') {
+      const sourceDomain = (payload?.domain as string) || '';
+      const alias = (payload?.alias as string) || '';
+      addDomainAlias(sourceDomain, alias).then((res) => {
+        sendResponse({ status: res.ok ? 'ok' : 'error', ...res });
+      }).catch((err) => {
+        sendResponse({ status: 'error', ok: false, message: err?.message });
+      });
+      return true;
+    }
+
+    // 8.3c 从指定站点移除关联镜像域名/通配符
+    if (action === 'REMOVE_DOMAIN_ALIAS') {
+      const sourceDomain = (payload?.domain as string) || '';
+      const alias = (payload?.alias as string) || '';
+      removeDomainAlias(sourceDomain, alias).then((ok) => {
+        sendResponse({ status: ok ? 'ok' : 'error', ok });
+      }).catch((err) => {
+        sendResponse({ status: 'error', ok: false, message: err?.message });
       });
       return true;
     }

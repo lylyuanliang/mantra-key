@@ -23,6 +23,8 @@ export interface SyncDomainEntry {
   canonicalDomain: string;
   displayName: string;
   rulePreset: string;
+  serviceKey?: string;
+  associatedDomains?: string[];
   accounts: Record<string, SyncAccountEntry>;
   updatedAt: number;
 }
@@ -132,8 +134,20 @@ export async function exportLocalManifest(canaryHash = ''): Promise<ExtensionMan
       let maxUpdatedAt = Date.now();
       let defaultRule: RulePreset = 'standard-16';
 
+      let domainServiceKey: string | undefined;
+      const assocSet = new Set<string>();
+
       for (const acc of val as AccountRecord[]) {
         if (!acc.username) continue;
+        if (!domainServiceKey && acc.serviceKey) {
+          domainServiceKey = acc.serviceKey;
+        }
+        if (Array.isArray(acc.aliases)) {
+          acc.aliases.forEach((a) => {
+            const clean = a.trim().toLowerCase();
+            if (clean && clean !== domain) assocSet.add(clean);
+          });
+        }
         accounts[acc.username] = {
           username: acc.username,
           version: acc.version || 1,
@@ -154,6 +168,8 @@ export async function exportLocalManifest(canaryHash = ''): Promise<ExtensionMan
         canonicalDomain: domain,
         displayName: domain,
         rulePreset: defaultRule,
+        serviceKey: domainServiceKey,
+        associatedDomains: assocSet.size > 0 ? Array.from(assocSet) : undefined,
         accounts,
         updatedAt: maxUpdatedAt
       };
@@ -179,15 +195,20 @@ export async function importMergedManifest(incomingManifest: ExtensionManifest):
   for (const [domain, entry] of Object.entries(merged.domains || {})) {
     const key = `${ACCOUNTS_PREFIX}${domain.toLowerCase()}`;
     const accountList: AccountRecord[] = [];
+    const domainAssoc = Array.isArray(entry.associatedDomains) ? entry.associatedDomains : [];
 
     for (const acc of Object.values(entry.accounts || {})) {
       if (acc.isDeleted) continue;
+      const aliasSet = new Set<string>([
+        ...(Array.isArray(acc.aliases) ? acc.aliases : []),
+        ...domainAssoc,
+      ]);
       accountList.push({
         username: acc.username,
         version: acc.version || 1,
         rulePreset: (entry.rulePreset as RulePreset) || 'standard-16',
-        serviceKey: acc.serviceKey,
-        aliases: acc.aliases,
+        serviceKey: acc.serviceKey || entry.serviceKey,
+        aliases: aliasSet.size > 0 ? Array.from(aliasSet) : undefined,
         createdAt: acc.updatedAt || Date.now(),
         updatedAt: acc.updatedAt || Date.now()
       });
@@ -227,26 +248,37 @@ export function mergeManifests(local: ExtensionManifest, remote: ExtensionManife
         if (!localAcc) {
           combinedAccounts[userKey] = remoteAcc;
         } else {
+          const mergedAliases = Array.from(new Set([
+            ...(Array.isArray(localAcc.aliases) ? localAcc.aliases : []),
+            ...(Array.isArray(remoteAcc.aliases) ? remoteAcc.aliases : []),
+          ]));
           if (remoteAcc.version > localAcc.version || (remoteAcc.version === localAcc.version && remoteAcc.updatedAt > localAcc.updatedAt)) {
             combinedAccounts[userKey] = {
               ...remoteAcc,
               serviceKey: remoteAcc.serviceKey || localAcc.serviceKey,
-              aliases: remoteAcc.aliases || localAcc.aliases
+              aliases: mergedAliases.length > 0 ? mergedAliases : undefined
             };
           } else {
             combinedAccounts[userKey] = {
               ...localAcc,
               serviceKey: localAcc.serviceKey || remoteAcc.serviceKey,
-              aliases: localAcc.aliases || remoteAcc.aliases
+              aliases: mergedAliases.length > 0 ? mergedAliases : undefined
             };
           }
         }
       }
 
+      const mergedAssoc = Array.from(new Set([
+        ...(Array.isArray(localDomain.associatedDomains) ? localDomain.associatedDomains : []),
+        ...(Array.isArray(remoteDomain.associatedDomains) ? remoteDomain.associatedDomains : []),
+      ]));
+
       merged.domains[domainKey] = {
         canonicalDomain: newerDomain.canonicalDomain,
         displayName: newerDomain.displayName || localDomain.displayName,
         rulePreset: newerDomain.rulePreset || localDomain.rulePreset,
+        serviceKey: newerDomain.serviceKey || localDomain.serviceKey,
+        associatedDomains: mergedAssoc.length > 0 ? mergedAssoc : undefined,
         accounts: combinedAccounts,
         updatedAt: Math.max(localDomain.updatedAt, remoteDomain.updatedAt)
       };
