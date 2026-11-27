@@ -1,6 +1,6 @@
 {
   "name": "@mantra-key/extension",
-  "version": "0.1.5.202611261815",
+  "version": "0.1.6.202611271527",
   "private": true,
   "type": "module",
   "scripts": {

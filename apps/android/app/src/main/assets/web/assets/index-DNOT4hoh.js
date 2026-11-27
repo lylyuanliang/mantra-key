@@ -109,7 +109,7 @@ const __vitePreload = function preload(baseModule, deps, importerUrl) {
   });
 };
 const acceleratorPrefix = "https://ghproxy.net/";
-const version = "0.1.5.202611261815";
+const version = "0.1.6.202611271527";
 const defaultConfig = {
   acceleratorPrefix,
   version
@@ -736,6 +736,25 @@ function removeManifestDomainAlias(canonicalDomain, rawAlias) {
   saveLocalManifest(manifest);
   return true;
 }
+function isCustomDisplayName(name, canonicalDomain) {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return false;
+  const rawDom = canonicalDomain.trim().toLowerCase();
+  const unicodeDom = toUnicodeDomain(rawDom).toLowerCase();
+  const normalizedName = toUnicodeDomain(trimmed.toLowerCase());
+  return trimmed.toLowerCase() !== rawDom && normalizedName !== unicodeDom;
+}
+function pickMergedDisplayName(localDomain, remoteDomain) {
+  const canonical = remoteDomain.canonicalDomain || localDomain.canonicalDomain || "";
+  const localCustom = isCustomDisplayName(localDomain.displayName, canonical);
+  const remoteCustom = isCustomDisplayName(remoteDomain.displayName, canonical);
+  if (localCustom && remoteCustom) {
+    return remoteDomain.updatedAt > localDomain.updatedAt ? remoteDomain.displayName : localDomain.displayName;
+  }
+  if (remoteCustom) return remoteDomain.displayName;
+  if (localCustom) return localDomain.displayName;
+  return remoteDomain.updatedAt > localDomain.updatedAt ? remoteDomain.displayName || localDomain.displayName || canonical : localDomain.displayName || remoteDomain.displayName || canonical;
+}
 function mergeManifests(local, remote) {
   const merged = {
     schemaVersion: Math.max(local.schemaVersion || 1, remote.schemaVersion || 1),
@@ -780,7 +799,7 @@ function mergeManifests(local, remote) {
       ]));
       merged.domains[domainKey] = {
         canonicalDomain: newerDomain.canonicalDomain,
-        displayName: newerDomain.displayName || localDomain.displayName,
+        displayName: pickMergedDisplayName(localDomain, remoteDomain),
         rulePreset: newerDomain.rulePreset || localDomain.rulePreset,
         serviceKey: newerDomain.serviceKey || localDomain.serviceKey,
         associatedDomains: mergedAssoc.length > 0 ? mergedAssoc : void 0,
@@ -1768,7 +1787,6 @@ function setupWebDAVSync() {
   const syncedRulesList = document.getElementById("synced-rules-list");
   const arrowRules = document.getElementById("arrow-rules-list");
   const countRulesEl = document.getElementById("count-synced-rules");
-  document.getElementById("input-mantra");
   function normalizeJianguoyunUrl(url) {
     const trimmed = (url || "").trim();
     if (/^https?:\/\/dav\.jianguoyun\.com\/dav\/?$/i.test(trimmed)) {

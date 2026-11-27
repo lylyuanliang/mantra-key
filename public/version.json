@@ -1,44 +1,44 @@
 {
-    "version": "0.1.5.202611261815",
-    "versionTag": "v0.1.5.202611261815",
-    "title": "MantraKey v0.1.5.202611261815",
-    "changelog": "1. 全端清单关联域名明细可视化与就地管理：Chrome 扩展弹窗清单、网页内嵌悬浮气泡及 Android 移动端速查清单均支持常驻显示关联网站列表、就地添加镜像/通配符域名与一键解绑\n2. 扩展 ↔ 移动端 WebDAV 双向同步深度对齐 associatedDomains / aliases 并集聚合逻辑，并修复关联站点密码派生统一采用 serviceKey 基底\n3. 优化网页密码框注入微标与提示的浅/深双主题实时联动，视觉体验更加协调克制",
-    "publishedAt": "2026-11-26 18:15:00",
-    "htmlUrl": "https://github.com/lylyuanliang/mantra-key/releases/tag/v0.1.5.202611261815",
+    "version": "0.1.6.202611271527",
+    "versionTag": "v0.1.6.202611271527",
+    "title": "MantraKey v0.1.6.202611271527",
+    "changelog": "1. 修复 WebDAV 跨端同步别名丢失问题：Chrome 扩展导出/导入完整保留并回写站点自定义别名 displayName 与真实时间戳，合并阶段禁止裸域名占位符覆盖有效别名\n2. PC 桌面端 HUD 正式接入动态 Manifest 清单与纯端侧 WebCrypto (PBKDF2+HKDF) 确定性派生引擎，支持搜索、快速录入、就地改别名/关联域名与版本步进\n3. 清理 Android Web 与 Chrome 扩展 TypeScript 预存类型告警，全端构建与单测检查通过",
+    "publishedAt": "2026-11-27 15:27:00",
+    "htmlUrl": "https://github.com/lylyuanliang/mantra-key/releases/tag/v0.1.6.202611271527",
     "artifacts": {
-        "mantra-key-chrome-extension-v0.1.5.202611261815.zip": {
-            "name": "mantra-key-chrome-extension-v0.1.5.202611261815.zip",
-            "sha256": "8199e60f2fb31d6afe8295cc86126c4affa551efbccd64a0d7c61fd963ae368f",
-            "size": 65633,
-            "sizeText": "64.1 KB",
-            "downloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.5.202611261815/mantra-key-chrome-extension-v0.1.5.202611261815.zip"
+        "mantra-key-chrome-extension-v0.1.6.202611271527.zip": {
+            "name": "mantra-key-chrome-extension-v0.1.6.202611271527.zip",
+            "sha256": "",
+            "size": 0,
+            "sizeText": "待 CI 回写",
+            "downloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.6.202611271527/mantra-key-chrome-extension-v0.1.6.202611271527.zip"
         },
-        "mantra-key-desktop-v0.1.5.202611261815-windows-x64.zip": {
-            "name": "mantra-key-desktop-v0.1.5.202611261815-windows-x64.zip",
-            "sha256": "0345d5cc05b502214adb621a77d169d74d39e9e68758c964b51130f0d3ec5e42",
-            "size": 403338,
-            "sizeText": "393.9 KB",
-            "downloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.5.202611261815/mantra-key-desktop-v0.1.5.202611261815-windows-x64.zip"
+        "mantra-key-desktop-v0.1.6.202611271527-windows-x64.zip": {
+            "name": "mantra-key-desktop-v0.1.6.202611271527-windows-x64.zip",
+            "sha256": "",
+            "size": 0,
+            "sizeText": "待 CI 回写",
+            "downloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.6.202611271527/mantra-key-desktop-v0.1.6.202611271527-windows-x64.zip"
         },
-        "mantra-key-v0.1.5.202611261815-release.apk": {
-            "name": "mantra-key-v0.1.5.202611261815-release.apk",
-            "sha256": "926651d6f88b4c13cfb30f289457fde2485bcb98a3a335d8382d83f35296f66f",
-            "size": 5650309,
-            "sizeText": "5.39 MB",
-            "downloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.5.202611261815/mantra-key-v0.1.5.202611261815-release.apk"
+        "mantra-key-v0.1.6.202611271527-release.apk": {
+            "name": "mantra-key-v0.1.6.202611271527-release.apk",
+            "sha256": "",
+            "size": 0,
+            "sizeText": "待 CI 回写",
+            "downloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.6.202611271527/mantra-key-v0.1.6.202611271527-release.apk"
         },
-        "mantra-key-v0.1.5.202611261815-debug.apk": {
-            "name": "mantra-key-v0.1.5.202611261815-debug.apk",
-            "sha256": "db16eb073cdcaf4d3f0c91d45c4afd4e734069f875ae7968276db8c9c55f7a1f",
-            "size": 6940912,
-            "sizeText": "6.62 MB",
-            "downloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.5.202611261815/mantra-key-v0.1.5.202611261815-debug.apk"
+        "mantra-key-v0.1.6.202611271527-debug.apk": {
+            "name": "mantra-key-v0.1.6.202611271527-debug.apk",
+            "sha256": "",
+            "size": 0,
+            "sizeText": "待 CI 回写",
+            "downloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.6.202611271527/mantra-key-v0.1.6.202611271527-debug.apk"
         }
     },
-    "releaseDownloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.5.202611261815/mantra-key-v0.1.5.202611261815-release.apk",
-    "debugDownloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.5.202611261815/mantra-key-v0.1.5.202611261815-debug.apk",
-    "releaseSha256": "926651d6f88b4c13cfb30f289457fde2485bcb98a3a335d8382d83f35296f66f",
-    "debugSha256": "db16eb073cdcaf4d3f0c91d45c4afd4e734069f875ae7968276db8c9c55f7a1f",
-    "extensionDownloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.5.202611261815/mantra-key-chrome-extension-v0.1.5.202611261815.zip",
-    "desktopDownloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.5.202611261815/mantra-key-desktop-v0.1.5.202611261815-windows-x64.zip"
+    "releaseDownloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.6.202611271527/mantra-key-v0.1.6.202611271527-release.apk",
+    "debugDownloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.6.202611271527/mantra-key-v0.1.6.202611271527-debug.apk",
+    "releaseSha256": "",
+    "debugSha256": "",
+    "extensionDownloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.6.202611271527/mantra-key-chrome-extension-v0.1.6.202611271527.zip",
+    "desktopDownloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.6.202611271527/mantra-key-desktop-v0.1.6.202611271527-windows-x64.zip"
 }
