@@ -513,6 +513,38 @@ export function removeManifestDomainAlias(canonicalDomain: string, rawAlias: str
 }
 
 /**
+ * 判断站点展示名是否为有效自定义别名（而非域名自身占位值）
+ */
+function isCustomDisplayName(name: string | undefined, canonicalDomain: string): boolean {
+  const trimmed = (name || '').trim();
+  if (!trimmed) return false;
+  const rawDom = canonicalDomain.trim().toLowerCase();
+  const unicodeDom = toUnicodeDomain(rawDom).toLowerCase();
+  const normalizedName = toUnicodeDomain(trimmed.toLowerCase());
+  return trimmed.toLowerCase() !== rawDom && normalizedName !== unicodeDom;
+}
+
+/**
+ * 合并两个站点条目的展示别名：有效自定义别名优先于裸域名占位符
+ */
+function pickMergedDisplayName(localDomain: DomainRuleEntry, remoteDomain: DomainRuleEntry): string {
+  const canonical = remoteDomain.canonicalDomain || localDomain.canonicalDomain || '';
+  const localCustom = isCustomDisplayName(localDomain.displayName, canonical);
+  const remoteCustom = isCustomDisplayName(remoteDomain.displayName, canonical);
+
+  if (localCustom && remoteCustom) {
+    return remoteDomain.updatedAt > localDomain.updatedAt
+      ? remoteDomain.displayName
+      : localDomain.displayName;
+  }
+  if (remoteCustom) return remoteDomain.displayName;
+  if (localCustom) return localDomain.displayName;
+  return remoteDomain.updatedAt > localDomain.updatedAt
+    ? (remoteDomain.displayName || localDomain.displayName || canonical)
+    : (localDomain.displayName || remoteDomain.displayName || canonical);
+}
+
+/**
  * 状态型 CRDT (CvRDT) 合并算子
  * 并行合并本地与远程 Manifest，根据时间戳与集合并集自动消除冲突
  */
@@ -568,7 +600,7 @@ export function mergeManifests(local: MantraManifest, remote: MantraManifest): M
 
       merged.domains[domainKey] = {
         canonicalDomain: newerDomain.canonicalDomain,
-        displayName: newerDomain.displayName || localDomain.displayName,
+        displayName: pickMergedDisplayName(localDomain, remoteDomain),
         rulePreset: newerDomain.rulePreset || localDomain.rulePreset,
         serviceKey: newerDomain.serviceKey || localDomain.serviceKey,
         associatedDomains: mergedAssoc.length > 0 ? mergedAssoc : undefined,

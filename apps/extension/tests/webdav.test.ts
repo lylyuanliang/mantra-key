@@ -1,10 +1,38 @@
 import test from 'node:test';
 import assert from 'node:assert';
+
+const mockWebdavStorage: Record<string, any> = {};
+(globalThis as any).chrome = {
+  storage: {
+    local: {
+      get: async (keys: any) => {
+        if (!keys) return { ...mockWebdavStorage };
+        if (typeof keys === 'string') return { [keys]: mockWebdavStorage[keys] };
+        if (Array.isArray(keys)) {
+          const res: Record<string, any> = {};
+          keys.forEach((k) => { res[k] = mockWebdavStorage[k]; });
+          return res;
+        }
+        return { ...mockWebdavStorage };
+      },
+      set: async (items: Record<string, any>) => {
+        Object.assign(mockWebdavStorage, items);
+      },
+      remove: async (keys: string | string[]) => {
+        const arr = Array.isArray(keys) ? keys : [keys];
+        arr.forEach((k) => delete mockWebdavStorage[k]);
+      },
+    },
+  },
+};
+
 import {
   normalizeWebDAVUrl,
   packSyncEnvelope,
   unpackSyncEnvelope,
   mergeManifests,
+  exportLocalManifest,
+  importMergedManifest,
   type ExtensionManifest
 } from '../src/utils/webdav.ts';
 
@@ -179,4 +207,86 @@ test('CvRDT - 同一站点双端同步应合并 associatedDomains 与账号 alia
   const merged = mergeManifests(local, remote);
   assert.deepStrictEqual(merged.domains['site.com'].associatedDomains, ['m1.site.com', 'm2.site.com']);
   assert.deepStrictEqual(merged.domains['site.com'].accounts['u1'].aliases, ['m1.site.com', 'm2.site.com']);
+});
+
+test('CvRDT - 裸域名占位符不得覆盖另一端的自定义站点别名 displayName', () => {
+  const local: ExtensionManifest = {
+    schemaVersion: 1,
+    canaryHash: 'H1',
+    domains: {
+      'example.com': {
+        canonicalDomain: 'example.com',
+        displayName: '我的专属站点',
+        rulePreset: 'standard-16',
+        accounts: {
+          'u1': { username: 'u1', version: 1, updatedAt: 100, isDeleted: false }
+        },
+        updatedAt: 100
+      }
+    },
+    updatedAt: 100
+  };
+
+  const remote: ExtensionManifest = {
+    schemaVersion: 1,
+    canaryHash: 'H1',
+    domains: {
+      'example.com': {
+        canonicalDomain: 'example.com',
+        displayName: 'example.com',
+        rulePreset: 'standard-16',
+        accounts: {
+          'u1': { username: 'u1', version: 1, updatedAt: 500, isDeleted: false }
+        },
+        updatedAt: 500
+      }
+    },
+    updatedAt: 500
+  };
+
+  const merged = mergeManifests(local, remote);
+  assert.strictEqual(merged.domains['example.com'].displayName, '我的专属站点');
+});
+
+test('Extension exportLocalManifest 与 importMergedManifest 应双向保留自定义别名 displayName', async () => {
+  Object.keys(mockWebdavStorage).forEach((k) => delete mockWebdavStorage[k]);
+  mockWebdavStorage['mantra_meta_mybank.com'] = {
+    displayName: '常用网银',
+    updatedAt: 12345
+  };
+  mockWebdavStorage['mantra_accs_mybank.com'] = [
+    {
+      username: 'alice',
+      version: 1,
+      rulePreset: 'standard-16',
+      displayName: '常用网银',
+      createdAt: 12345,
+      updatedAt: 12345
+    }
+  ];
+
+  const exported = await exportLocalManifest('CANARY01');
+  assert.strictEqual(exported.domains['mybank.com'].displayName, '常用网银');
+  assert.strictEqual(exported.domains['mybank.com'].updatedAt, 12345);
+
+  const incomingFromAndroid: ExtensionManifest = {
+    schemaVersion: 1,
+    canaryHash: 'CANARY01',
+    domains: {
+      'portal.work.cn': {
+        canonicalDomain: 'portal.work.cn',
+        displayName: '公司门户',
+        rulePreset: 'secure-20',
+        accounts: {
+          'bob': { username: 'bob', version: 2, updatedAt: 50000, isDeleted: false }
+        },
+        updatedAt: 50000
+      }
+    },
+    updatedAt: 50000
+  };
+
+  await importMergedManifest(incomingFromAndroid);
+  assert.strictEqual(mockWebdavStorage['mantra_meta_portal.work.cn']?.displayName, '公司门户');
+  assert.strictEqual(mockWebdavStorage['mantra_accs_portal.work.cn']?.[0]?.displayName, '公司门户');
 });

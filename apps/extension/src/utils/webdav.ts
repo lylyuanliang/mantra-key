@@ -8,7 +8,8 @@
  */
 
 import { type RulePreset } from './crypto.ts';
-import { type AccountRecord } from './storage.ts';
+import { toUnicodeDomain } from './domain.ts';
+import { type AccountRecord, type DomainMeta } from './storage.ts';
 
 export interface SyncAccountEntry {
   username: string;
@@ -54,6 +55,39 @@ export interface SyncStatusInfo {
 const STORAGE_KEY_CONFIG = 'mk_webdav_config';
 const STORAGE_KEY_SYNC_INFO = 'mk_sync_status_info';
 const ACCOUNTS_PREFIX = 'mantra_accs_';
+const DOMAIN_META_PREFIX = 'mantra_meta_';
+
+/**
+ * 判断站点展示名是否为有效自定义别名（而非域名自身占位值）
+ */
+function isCustomDisplayName(name: string | undefined, canonicalDomain: string): boolean {
+  const trimmed = (name || '').trim();
+  if (!trimmed) return false;
+  const rawDom = canonicalDomain.trim().toLowerCase();
+  const unicodeDom = toUnicodeDomain(rawDom).toLowerCase();
+  const normalizedName = toUnicodeDomain(trimmed.toLowerCase());
+  return trimmed.toLowerCase() !== rawDom && normalizedName !== unicodeDom;
+}
+
+/**
+ * 合并两个站点条目的展示别名：有效自定义别名优先于裸域名占位符
+ */
+function pickMergedDisplayName(localDomain: SyncDomainEntry, remoteDomain: SyncDomainEntry): string {
+  const canonical = remoteDomain.canonicalDomain || localDomain.canonicalDomain || '';
+  const localCustom = isCustomDisplayName(localDomain.displayName, canonical);
+  const remoteCustom = isCustomDisplayName(remoteDomain.displayName, canonical);
+
+  if (localCustom && remoteCustom) {
+    return remoteDomain.updatedAt > localDomain.updatedAt
+      ? remoteDomain.displayName
+      : localDomain.displayName;
+  }
+  if (remoteCustom) return remoteDomain.displayName;
+  if (localCustom) return localDomain.displayName;
+  return remoteDomain.updatedAt > localDomain.updatedAt
+    ? (remoteDomain.displayName || localDomain.displayName || canonical)
+    : (localDomain.displayName || remoteDomain.displayName || canonical);
+}
 
 /**
  * 规范化 WebDAV URL：
@@ -130,17 +164,22 @@ export async function exportLocalManifest(canaryHash = ''): Promise<ExtensionMan
   for (const [key, val] of Object.entries(allItems)) {
     if (key.startsWith(ACCOUNTS_PREFIX) && Array.isArray(val)) {
       const domain = key.substring(ACCOUNTS_PREFIX.length).toLowerCase();
+      const meta = allItems[`${DOMAIN_META_PREFIX}${domain}`] as DomainMeta | undefined;
       const accounts: Record<string, SyncAccountEntry> = {};
-      let maxUpdatedAt = Date.now();
+      let maxUpdatedAt = meta?.updatedAt || 0;
       let defaultRule: RulePreset = 'standard-16';
 
       let domainServiceKey: string | undefined;
+      let customDisplayName = (meta?.displayName || '').trim();
       const assocSet = new Set<string>();
 
       for (const acc of val as AccountRecord[]) {
         if (!acc.username) continue;
         if (!domainServiceKey && acc.serviceKey) {
           domainServiceKey = acc.serviceKey;
+        }
+        if (!customDisplayName && acc.displayName) {
+          customDisplayName = acc.displayName.trim();
         }
         if (Array.isArray(acc.aliases)) {
           acc.aliases.forEach((a) => {
@@ -164,9 +203,13 @@ export async function exportLocalManifest(canaryHash = ''): Promise<ExtensionMan
         }
       }
 
+      if (maxUpdatedAt === 0) {
+        maxUpdatedAt = Date.now();
+      }
+
       domains[domain] = {
         canonicalDomain: domain,
-        displayName: domain,
+        displayName: customDisplayName || domainServiceKey || domain,
         rulePreset: defaultRule,
         serviceKey: domainServiceKey,
         associatedDomains: assocSet.size > 0 ? Array.from(assocSet) : undefined,
@@ -190,12 +233,23 @@ export async function exportLocalManifest(canaryHash = ''): Promise<ExtensionMan
 export async function importMergedManifest(incomingManifest: ExtensionManifest): Promise<void> {
   const localManifest = await exportLocalManifest('');
   const merged = mergeManifests(localManifest, incomingManifest);
-  const updates: Record<string, AccountRecord[]> = {};
+  const updates: Record<string, AccountRecord[] | DomainMeta> = {};
 
   for (const [domain, entry] of Object.entries(merged.domains || {})) {
-    const key = `${ACCOUNTS_PREFIX}${domain.toLowerCase()}`;
+    const lowerDomain = domain.toLowerCase();
+    const key = `${ACCOUNTS_PREFIX}${lowerDomain}`;
+    const metaKey = `${DOMAIN_META_PREFIX}${lowerDomain}`;
     const accountList: AccountRecord[] = [];
     const domainAssoc = Array.isArray(entry.associatedDomains) ? entry.associatedDomains : [];
+    const hasCustomAlias = isCustomDisplayName(entry.displayName, lowerDomain);
+    const resolvedDisplayName = hasCustomAlias ? entry.displayName.trim() : undefined;
+
+    if (resolvedDisplayName) {
+      updates[metaKey] = {
+        displayName: resolvedDisplayName,
+        updatedAt: entry.updatedAt || Date.now(),
+      };
+    }
 
     for (const acc of Object.values(entry.accounts || {})) {
       if (acc.isDeleted) continue;
@@ -207,6 +261,7 @@ export async function importMergedManifest(incomingManifest: ExtensionManifest):
         username: acc.username,
         version: acc.version || 1,
         rulePreset: (entry.rulePreset as RulePreset) || 'standard-16',
+        displayName: resolvedDisplayName,
         serviceKey: acc.serviceKey || entry.serviceKey,
         aliases: aliasSet.size > 0 ? Array.from(aliasSet) : undefined,
         createdAt: acc.updatedAt || Date.now(),
@@ -275,7 +330,7 @@ export function mergeManifests(local: ExtensionManifest, remote: ExtensionManife
 
       merged.domains[domainKey] = {
         canonicalDomain: newerDomain.canonicalDomain,
-        displayName: newerDomain.displayName || localDomain.displayName,
+        displayName: pickMergedDisplayName(localDomain, remoteDomain),
         rulePreset: newerDomain.rulePreset || localDomain.rulePreset,
         serviceKey: newerDomain.serviceKey || localDomain.serviceKey,
         associatedDomains: mergedAssoc.length > 0 ? mergedAssoc : undefined,
