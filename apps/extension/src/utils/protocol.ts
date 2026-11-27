@@ -20,6 +20,7 @@ export interface ResponseEnvelope<T = unknown> {
   code: number;
   data: T;
   error?: string | null;
+  message?: string;
 }
 
 /**
