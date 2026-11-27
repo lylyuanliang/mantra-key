@@ -18,12 +18,12 @@
   <div class="desktop-backdrop"></div>
   <div class="desktop-grid-lines"></div>
 
-  <!-- 2. 模拟前台运行的原生 Steam 登录客户端 (桌面目标宿主视窗) -->
+  <!-- 2. 模拟前台运行的桌面目标宿主视窗 (随选中站点动态联动) -->
   <div class="host-app-preview" id="hostAppWindow">
     <div class="host-app-header">
       <div style="display:flex; align-items:center; gap:8px;">
-        <span style="font-size:16px;">🎮</span>
-        <span style="font-weight:600; font-size:12px; color:#C6D4DF;">Steam - Account Sign In</span>
+        <span style="font-size:16px;">🖥️</span>
+        <span style="font-weight:600; font-size:12px; color:#C6D4DF;" id="hostWindowTitle">桌面目标宿主视窗 (待选择站点)</span>
       </div>
       <div style="display:flex; gap:8px; font-size:11px;">
         <span>—</span>
@@ -37,12 +37,12 @@
       </div>
       <div style="width:100%; display:flex; flex-direction:column; gap:4px;">
         <span style="color:#8F98A0; font-size:10px; font-family:var(--font-mono); text-transform:uppercase;">Account Name</span>
-        <div class="host-fake-input">steam_gamer_pro</div>
+        <div class="host-fake-input" id="hostAccountDisplay">未选择账号</div>
       </div>
       <div style="width:100%; display:flex; flex-direction:column; gap:4px;">
         <span style="color:#8F98A0; font-size:10px; font-family:var(--font-mono); text-transform:uppercase;">Password</span>
         <div class="host-fake-input" id="hostPasswordTarget" style="border-color: rgba(0, 240, 255, 0.4); justify-content:space-between;">
-          <span style="color:var(--cipher-cyan);" id="injectedDisplay">••••••••••••••••</span>
+          <span style="color:var(--cipher-cyan);" id="injectedDisplay">等待派生注入...</span>
           <span style="font-size:12px; color:var(--cipher-cyan);">🔒</span>
         </div>
       </div>
@@ -88,13 +88,17 @@
       <div class="hud-header">
         <div class="hud-header-top">
           <div class="process-target-chip">
-            <div class="target-icon-box">🎮</div>
+            <div class="target-icon-box">🔑</div>
             <div class="target-text-group">
-              <span class="target-exe">steam.exe</span>
-              <span class="target-pid">PID: 8840</span>
+              <span class="target-exe" id="hudActiveTitle">密诀动态凭据清单</span>
+              <span class="target-pid" id="hudManifestCount">0 个站点</span>
             </div>
           </div>
           <div style="display: flex; gap: 8px; align-items: center;">
+            <button type="button" class="btn-hud-sync" id="btnToggleAddSite" title="新增站点与账号规则" style="background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.35); color: var(--cipher-jade); font-size: 10px; border-radius: 4px; padding: 2px 8px; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+              <span>➕</span>
+              <span>录入</span>
+            </button>
             <button type="button" class="btn-hud-sync" id="btnOpenSyncModal" title="WebDAV 多端加密同步" style="background: rgba(0,240,255,0.1); border: 1px solid rgba(0,240,255,0.3); color: var(--cipher-cyan); font-size: 10px; border-radius: 4px; padding: 2px 8px; cursor: pointer; display: flex; align-items: center; gap: 4px;">
               <span>🌐</span>
               <span>WebDAV 同步</span>
@@ -109,8 +113,8 @@
         <div class="hud-meta-row">
           <div class="domain-mapping-pill">
             <span style="font-size:10px;">🌐</span>
-            <span>steampowered.com</span>
-            <span class="auto-mapped-tag">[Auto-Mapped]</span>
+            <span id="hudActiveDomain">未选择站点</span>
+            <span class="auto-mapped-tag" id="hudActiveAliasTag">[Dynamic Manifest]</span>
           </div>
           <div class="mlock-guard-badge">
             <span>🛡️</span>
@@ -126,9 +130,9 @@
             <span>主口令心诀 (Master Mantra)</span>
           </span>
           <!-- 金丝雀实时安全呼吸指示灯 -->
-          <div class="canary-indicator" id="canaryIndicator" title="金丝雀防手抖哈希实时核验">
+          <div class="canary-indicator warning" id="canaryIndicator" title="金丝雀防手抖哈希实时核验">
             <span class="canary-dot" id="canaryDot"></span>
-            <span id="canaryText">金丝雀防手抖: 已就绪</span>
+            <span id="canaryText">等待主心诀口令输入</span>
           </div>
         </div>
 
@@ -138,8 +142,8 @@
             type="password"
             id="mantraInput"
             class="mantra-input font-mono"
-            placeholder="键入您的主心诀口令以派生..."
-            value="MantraKey#Secret2026"
+            placeholder="键入您的主心诀口令以现场派生..."
+            value=""
             autocomplete="off"
             spellcheck="false"
           />
@@ -151,93 +155,33 @@
         </div>
       </section>
 
-      <!-- 账号选择卡片流容器 (多账号快速切换) -->
-      <div class="hud-body-stream" id="accountList">
-        <!-- 账号卡片 1：默认高亮选中卡片 -->
-        <div class="credential-card selected" data-account="steam_gamer_pro" data-version="1" data-preset="Standard 16-char (v1)">
-          <div class="card-top-row">
-            <div class="card-user-info">
-              <div class="card-user-icon">👤</div>
-              <div>
-                <div style="display:flex; align-items:center; gap:6px;">
-                  <span class="username-text">steam_gamer_pro</span>
-                  <span class="account-badge">主账号 (Primary)</span>
-                </div>
-              </div>
-            </div>
-            <div class="entropy-tag">
-              <span style="width:6px; height:6px; border-radius:50%; background:var(--cipher-cyan);"></span>
-              <span>128-bit Salted</span>
-            </div>
-          </div>
+      <!-- 清单搜索与快捷录入抽屉 -->
+      <div class="hud-manifest-toolbar">
+        <input type="text" id="hudSearchInput" class="hud-search-input font-mono" placeholder="🔍 搜索站点域名、别名、关联网站或账号..." autocomplete="off" />
+        <button type="button" id="btnClearHudSearch" class="btn-hud-mini" style="display:none;" title="清空搜索">✕</button>
+      </div>
 
-          <!-- 版本步进器与规则说明 -->
-          <div class="card-version-row">
-            <div style="display:flex; align-items:center; gap:6px;">
-              <span>版本步进:</span>
-              <div class="version-stepper">
-                <button type="button" class="btn-stepper btn-ver-down" title="回退版本">-</button>
-                <span class="stepper-val ver-display">v1</span>
-                <button type="button" class="btn-stepper btn-ver-up" title="升级版本">+</button>
-              </div>
-            </div>
-            <span style="font-size:10px; color:var(--text-muted);">Standard 16-char</span>
-          </div>
-
-          <!-- 掩码预览与哈希校验框 -->
-          <div class="mask-preview-box">
-            <div style="display:flex; align-items:center; gap:8px;">
-              <span style="color:var(--text-muted); font-size:12px;">🔒</span>
-              <span class="mask-code" id="cardPwdMask1">••••••••••••••••</span>
-            </div>
-            <div class="sha-preview">
-              <span>SHA256: 0x9f4a..c3</span>
-              <button type="button" class="btn-copy-mini btn-copy-card" title="复制派生结果">📋</button>
-            </div>
-          </div>
+      <div class="hud-add-drawer hidden" id="hudAddDrawer">
+        <div class="hud-add-grid">
+          <input type="text" id="addSiteDomain" class="hud-mini-input font-mono" placeholder="域名 (如 github.com)" />
+          <input type="text" id="addSiteAlias" class="hud-mini-input" placeholder="别名 (选填，如 代码库)" />
+          <input type="text" id="addSiteUser" class="hud-mini-input font-mono" placeholder="账号 (如 dev_user)" />
+          <select id="addSitePreset" class="hud-mini-input font-mono">
+            <option value="standard-16">16位标准 (standard-16)</option>
+            <option value="secure-20">20位高强 (secure-20)</option>
+            <option value="super-32">32位极高安全 (super-32)</option>
+            <option value="alphanumeric-16">16位无符号 (alphanumeric-16)</option>
+            <option value="pin-6">6位PIN (pin-6)</option>
+          </select>
         </div>
-
-        <!-- 账号卡片 2：次级账号卡片 -->
-        <div class="credential-card" data-account="smurf_trader_vault" data-version="2" data-preset="Super-Secure 24-char (v2)">
-          <div class="card-top-row">
-            <div class="card-user-info">
-              <div class="card-user-icon" style="background:rgba(255,255,255,0.06); color:var(--text-secondary);">👥</div>
-              <div>
-                <div style="display:flex; align-items:center; gap:6px;">
-                  <span class="username-text">smurf_trader_vault</span>
-                  <span class="account-badge" style="background:rgba(255,255,255,0.08); border-color:var(--border-cipher); color:var(--text-secondary);">副账号 (Alt)</span>
-                </div>
-              </div>
-            </div>
-            <div class="entropy-tag">
-              <span>256-bit Salt</span>
-            </div>
-          </div>
-
-          <div class="card-version-row">
-            <div style="display:flex; align-items:center; gap:6px;">
-              <span>版本步进:</span>
-              <div class="version-stepper">
-                <button type="button" class="btn-stepper btn-ver-down" title="回退版本">-</button>
-                <span class="stepper-val ver-display">v2</span>
-                <button type="button" class="btn-stepper btn-ver-up" title="升级版本">+</button>
-              </div>
-            </div>
-            <span style="font-size:10px; color:var(--text-muted);">Super-Secure 24-char</span>
-          </div>
-
-          <div class="mask-preview-box">
-            <div style="display:flex; align-items:center; gap:8px;">
-              <span style="color:var(--text-muted); font-size:12px;">🔑</span>
-              <span class="mask-code" style="color:var(--text-secondary);" id="cardPwdMask2">••••••••••••••••••••••••</span>
-            </div>
-            <div class="sha-preview">
-              <span>按 [2] 键切换</span>
-              <button type="button" class="btn-copy-mini btn-copy-card" title="复制派生结果">📋</button>
-            </div>
-          </div>
+        <div class="hud-add-actions">
+          <button type="button" id="btnSaveNewSite" class="btn-hud-save-site">保存至动态清单</button>
+          <button type="button" id="btnCancelNewSite" class="btn-hud-cancel-site">取消</button>
         </div>
       </div>
+
+      <!-- 账号选择卡片流容器 (动态 Manifest 渲染) -->
+      <div class="hud-body-stream" id="accountList"></div>
 
       <!-- 底部操作栏 (Cyan 高亮主操作 + Ghost 次级操作) -->
       <div class="hud-action-bar">

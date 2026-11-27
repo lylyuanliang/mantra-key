@@ -19,7 +19,6 @@ import {
   recordDomainRule,
   recordDomainAccount,
   removeDomainRule,
-  removeDomainAccount,
   getEntryAssociatedDomains,
   addManifestDomainAlias,
   removeManifestDomainAlias,
@@ -747,8 +746,6 @@ function setupWebDAVSync() {
   const syncedRulesList = document.getElementById('synced-rules-list');
   const arrowRules = document.getElementById('arrow-rules-list');
   const countRulesEl = document.getElementById('count-synced-rules');
-
-  const inputMantra = document.getElementById('input-mantra') as HTMLInputElement | null;
 
   function normalizeJianguoyunUrl(url: string): string {
     const trimmed = (url || '').trim();
