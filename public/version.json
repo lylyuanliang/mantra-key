@@ -8,37 +8,37 @@
     "artifacts": {
         "mantra-key-chrome-extension-v0.1.6.202611271527.zip": {
             "name": "mantra-key-chrome-extension-v0.1.6.202611271527.zip",
-            "sha256": "",
-            "size": 0,
-            "sizeText": "待 CI 回写",
+            "sha256": "1bed335f6514a61e31c385d516b4e3874e1f011bc11072cd948545b05a3a3b54",
+            "size": 65832,
+            "sizeText": "64.3 KB",
             "downloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.6.202611271527/mantra-key-chrome-extension-v0.1.6.202611271527.zip"
         },
         "mantra-key-desktop-v0.1.6.202611271527-windows-x64.zip": {
             "name": "mantra-key-desktop-v0.1.6.202611271527-windows-x64.zip",
-            "sha256": "",
-            "size": 0,
-            "sizeText": "待 CI 回写",
+            "sha256": "1a31c616315f04609dfd717a350c3b0f1751d3dac27dec71bab3de7932d5c3fe",
+            "size": 403339,
+            "sizeText": "393.9 KB",
             "downloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.6.202611271527/mantra-key-desktop-v0.1.6.202611271527-windows-x64.zip"
         },
         "mantra-key-v0.1.6.202611271527-release.apk": {
             "name": "mantra-key-v0.1.6.202611271527-release.apk",
-            "sha256": "",
-            "size": 0,
-            "sizeText": "待 CI 回写",
+            "sha256": "dd9cc0ad2fd8050ea9a847d3224d618ffceb3adbd919ca87d362ad903f41517f",
+            "size": 5650385,
+            "sizeText": "5.39 MB",
             "downloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.6.202611271527/mantra-key-v0.1.6.202611271527-release.apk"
         },
         "mantra-key-v0.1.6.202611271527-debug.apk": {
             "name": "mantra-key-v0.1.6.202611271527-debug.apk",
-            "sha256": "",
-            "size": 0,
-            "sizeText": "待 CI 回写",
+            "sha256": "cf8495b7a672564e2256282fe8850efa3d7316c9188a12dd178ec913ea7cea06",
+            "size": 6941092,
+            "sizeText": "6.62 MB",
             "downloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.6.202611271527/mantra-key-v0.1.6.202611271527-debug.apk"
         }
     },
     "releaseDownloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.6.202611271527/mantra-key-v0.1.6.202611271527-release.apk",
     "debugDownloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.6.202611271527/mantra-key-v0.1.6.202611271527-debug.apk",
-    "releaseSha256": "",
-    "debugSha256": "",
+    "releaseSha256": "dd9cc0ad2fd8050ea9a847d3224d618ffceb3adbd919ca87d362ad903f41517f",
+    "debugSha256": "cf8495b7a672564e2256282fe8850efa3d7316c9188a12dd178ec913ea7cea06",
     "extensionDownloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.6.202611271527/mantra-key-chrome-extension-v0.1.6.202611271527.zip",
     "desktopDownloadUrl": "https://github.com/lylyuanliang/mantra-key/releases/download/v0.1.6.202611271527/mantra-key-desktop-v0.1.6.202611271527-windows-x64.zip"
 }
