@@ -1,6 +1,17 @@
 import '../styles/content.css';
 import { extractDomain, toUnicodeDomain } from '../utils/domain';
-import { computeCanary } from '../utils/crypto';
+import { computeCanary, deriveSitePassword, type RulePreset } from '../utils/crypto';
+import {
+  getAllAccountsManifest,
+  getAccountsForDomain,
+  getSessionState,
+  unlockSession,
+  linkDomainToExisting,
+  addDomainAlias,
+  removeDomainAlias,
+  setDomainDisplayName,
+  type DomainAccountsGroup,
+} from '../utils/storage';
 
 export default defineContentScript({
   matches: ['<all_urls>'],
@@ -235,10 +246,25 @@ export default defineContentScript({
     }
 
     /**
+     * 判断扩展上下文是否仍有效（防止扩展重载后旧标签页误报空清单）
+     */
+    function isExtensionContextAlive(): boolean {
+      try {
+        return Boolean(chrome?.runtime?.id);
+      } catch {
+        return false;
+      }
+    }
+
+    /**
      * 安全跨进程通信，内建超时与异常兜底，防止挂死
      */
-    function safeSendMessage<T>(msg: Record<string, unknown>, timeoutMs = 800): Promise<T | null> {
+    function safeSendMessage<T>(msg: Record<string, unknown>, timeoutMs = 1500): Promise<T | null> {
       return new Promise((resolve) => {
+        if (!isExtensionContextAlive()) {
+          resolve(null);
+          return;
+        }
         let done = false;
         const timer = setTimeout(() => {
           if (!done) {
@@ -269,6 +295,85 @@ export default defineContentScript({
     }
 
     /**
+     * 可靠拉取全量站点与账号清单：优先后台通道，超时/休眠时直读 chrome.storage.local 兜底
+     */
+    async function loadManifestGroupsReliable(): Promise<{ groups: DomainAccountsGroup[]; contextLost: boolean }> {
+      if (!isExtensionContextAlive()) {
+        return { groups: [], contextLost: true };
+      }
+
+      const manifestRes = await safeSendMessage<{ groups?: DomainAccountsGroup[] }>({
+        action: 'GET_ALL_MANIFEST'
+      }, 1500);
+
+      if (Array.isArray(manifestRes?.groups)) {
+        return { groups: manifestRes.groups, contextLost: false };
+      }
+
+      try {
+        const directGroups = await getAllAccountsManifest();
+        return { groups: directGroups, contextLost: false };
+      } catch {
+        return { groups: [], contextLost: !isExtensionContextAlive() };
+      }
+    }
+
+    /**
+     * 派生站点密码：优先通过后台（可触发原生代理），失败/超时时本地 WebCrypto 直算兜底
+     */
+    async function deriveCredentialReliable(params: {
+      domain: string;
+      serviceKey?: string;
+      username: string;
+      version: number;
+      rulePreset: string;
+      mantra?: string;
+    }): Promise<{ password?: string; message?: string }> {
+      if (params.mantra) {
+        const msgRes = await safeSendMessage({ action: 'UNLOCK_SESSION', payload: { mantra: params.mantra } }, 1000);
+        if (!msgRes) {
+          try {
+            await unlockSession(params.mantra, 900);
+          } catch {}
+        }
+      }
+
+      const bgRes = await safeSendMessage<{ status?: string; message?: string; data?: { derived_password?: string } }>({
+        action: 'DERIVE_CREDENTIAL',
+        payload: {
+          domain: params.domain,
+          serviceKey: params.serviceKey,
+          username: params.username,
+          version: params.version,
+          rule_preset: params.rulePreset,
+        },
+      }, 1500);
+
+      if (bgRes?.data?.derived_password) {
+        return { password: bgRes.data.derived_password };
+      }
+
+      try {
+        const session = await getSessionState();
+        const activeMantra = params.mantra || session.mantra || '';
+        if (!activeMantra) {
+          return { message: bgRes?.message || '请先输入记忆口令' };
+        }
+        const derivationBase = (params.serviceKey || '').trim() || params.domain.trim();
+        const pwd = await deriveSitePassword(
+          activeMantra,
+          derivationBase,
+          params.username,
+          params.version || 1,
+          (params.rulePreset as RulePreset) || 'standard-16'
+        );
+        return { password: pwd };
+      } catch (err: any) {
+        return { message: err?.message || bgRes?.message || '派生失败' };
+      }
+    }
+
+    /**
      * 弹出 Screen 01 悬浮内嵌气泡卡片 (100% 挂载在 body 上，彻底防裁剪)
      * 支持查看账号清单、常变镜像关联操作、选定记录看详情以及录入新账号口令同屏联动
      */
@@ -285,15 +390,36 @@ export default defineContentScript({
       bubble.addEventListener('click', (e) => e.stopPropagation());
       bubble.addEventListener('mousedown', (e) => e.stopPropagation());
 
-      // 查询会话状态、本站点真实已存账号与当前主题 (带超时与兜底保障)
-      let [sessionRes, accountsRes, themeRes] = await Promise.all([
-        safeSendMessage<{ data?: { session_state?: string; ttl_remaining?: number; canary?: string } }>({ action: 'QUERY_SESSION' }, 600),
+      // 查询会话状态、本站点真实已存账号、全量清单与当前主题 (带直读 storage 兜底)
+      let [sessionRes, accountsRes, themeRes, manifestInit] = await Promise.all([
+        safeSendMessage<{ data?: { session_state?: string; ttl_remaining?: number; canary?: string } }>({ action: 'QUERY_SESSION' }, 1000),
         safeSendMessage<{ accounts?: Array<{ username: string; version: number; rulePreset: string; tag?: string; serviceKey?: string }> }>({
           action: 'GET_ACCOUNTS_FOR_DOMAIN',
           payload: { domain: currentDomain, title: document.title }
-        }, 600),
-        safeSendMessage<{ theme?: string }>({ action: 'GET_THEME' }, 300),
+        }, 1000),
+        safeSendMessage<{ theme?: string }>({ action: 'GET_THEME' }, 400),
+        loadManifestGroupsReliable(),
       ]);
+
+      if (!sessionRes?.data && isExtensionContextAlive()) {
+        try {
+          const directSess = await getSessionState();
+          sessionRes = {
+            data: {
+              session_state: directSess.isUnlocked ? 'unlocked' : 'locked',
+              ttl_remaining: directSess.ttlRemaining,
+              canary: directSess.canary || undefined,
+            },
+          };
+        } catch {}
+      }
+
+      if (!Array.isArray(accountsRes?.accounts) && isExtensionContextAlive()) {
+        try {
+          const directAccs = await getAccountsForDomain(currentDomain, document.title);
+          accountsRes = { accounts: directAccs };
+        } catch {}
+      }
 
       const resolvedTheme: MantraTheme = themeRes?.theme === 'dark' ? 'dark' : 'light';
       applyInPageTheme(resolvedTheme);
@@ -303,6 +429,8 @@ export default defineContentScript({
       let ttlMinutes = Math.floor((sessionRes?.data?.ttl_remaining || 0) / 60);
       let canaryText = sessionRes?.data?.canary ? `[${sessionRes.data.canary}]` : '待计算';
       let accounts = accountsRes?.accounts || [];
+      let allManifestGroups: DomainAccountsGroup[] = manifestInit.groups;
+      let manifestContextLost = manifestInit.contextLost;
 
       // 气泡内部导航状态
       let currentView: 'main' | 'manifest' = 'main';
@@ -478,14 +606,81 @@ export default defineContentScript({
           `;
         }
 
+        let quickPickHtml = '';
+        if (accounts.length === 0 && allManifestGroups.length > 0) {
+          const escQuick = (raw: string) =>
+            raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+          const previewChips = allManifestGroups.slice(0, 4).map((g) => {
+            const firstAcc = g.accounts[0];
+            if (!firstAcc) return '';
+            const hasCustom = Boolean(g.displayName && g.displayName !== g.unicodeDomain && g.displayName !== g.domain);
+            const label = hasCustom ? g.displayName! : g.unicodeDomain;
+            return `<button type="button" class="bubble-manifest-acc-btn btn-quick-adopt-site" data-domain="${escQuick(g.domain)}" data-user="${escQuick(firstAcc.username)}" title="直接选用 [${escQuick(label)}] 的账号 ${escQuick(firstAcc.username)}">⚡ ${escQuick(label)} · ${escQuick(firstAcc.username)}</button>`;
+          }).join('');
+
+          quickPickHtml = `
+            <div class="bubble-quick-pick-banner">
+              <div class="bubble-quick-pick-header">
+                <span>🌐 当前域名暂未关联 · 已存 ${allManifestGroups.length} 个站点</span>
+                <button type="button" class="mantra-bubble-header-btn" id="bubble-btn-open-all-manifest" style="white-space: nowrap;">📋 全部清单</button>
+              </div>
+              ${previewChips ? `<div class="bubble-quick-pick-chips">${previewChips}</div>` : ''}
+            </div>
+          `;
+        }
+
         const bodyContainer = bubble.querySelector('#bubble-body-container');
         if (bodyContainer) {
           bodyContainer.innerHTML = `
+            ${quickPickHtml}
             ${accountsListHtml}
             ${detailOrAddHtml}
           `;
           bindMainEvents();
         }
+      }
+
+      async function adoptManifestAccount(group: DomainAccountsGroup, acc: any) {
+        const hasCustom = Boolean(group.displayName && group.displayName !== group.unicodeDomain && group.displayName !== group.domain);
+        const title = hasCustom ? group.displayName! : group.unicodeDomain;
+        const derivationBase = acc.serviceKey || group.serviceKey || group.domain;
+
+        if (isUnlocked) {
+          const derived = await deriveCredentialReliable({
+            domain: currentDomain,
+            serviceKey: derivationBase,
+            username: acc.username,
+            version: acc.version || 1,
+            rulePreset: acc.rulePreset || 'standard-16',
+          });
+          if (derived.password) {
+            injectInputValue(anchorInput, derived.password);
+            autofillPageCredentials(acc.username, derived.password);
+            showInPageToast(`⚡ 已使用 [${title} · ${acc.username}] 填充`);
+            closeBubble();
+            return;
+          }
+        }
+
+        const adopted = {
+          username: acc.username,
+          version: acc.version || 1,
+          rulePreset: acc.rulePreset || 'standard-16',
+          serviceKey: derivationBase,
+          tag: `来自: ${title}`,
+        };
+        const existingIdx = accounts.findIndex(
+          (a) => a.username === adopted.username && (a.serviceKey || '') === (adopted.serviceKey || '')
+        );
+        if (existingIdx >= 0) {
+          selectedAccountIndex = existingIdx;
+        } else {
+          accounts = [adopted, ...accounts];
+          selectedAccountIndex = 0;
+        }
+        isNewAccountMode = false;
+        currentView = 'main';
+        renderBubbleContent();
       }
 
       async function renderManifestView() {
@@ -495,10 +690,10 @@ export default defineContentScript({
         bodyContainer.innerHTML = `
           <div class="bubble-manifest-view">
             <div style="display: flex; gap: 6px; align-items: center;">
-              <button type="button" class="mantra-bubble-header-btn" id="bubble-btn-back-main" style="padding: 4px 8px; font-weight: 600;">
+              <button type="button" class="mantra-bubble-header-btn" id="bubble-btn-back-main" style="padding: 4px 8px; font-weight: 600; white-space: nowrap; flex-shrink: 0;">
                 ← 返回
               </button>
-              <input type="text" id="bubble-manifest-search" class="bubble-manifest-search-input" placeholder="搜索已保存的站点或账号..." />
+              <input type="text" id="bubble-manifest-search" class="bubble-manifest-search-input" data-mantra-internal="true" autocomplete="off" placeholder="搜索已保存的站点或账号 (留空展示全部)..." />
             </div>
             <div id="bubble-manifest-items" style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
               <div style="text-align: center; color: #94a3b8; font-size: 11px; padding: 12px;">加载账号清单中...</div>
@@ -511,35 +706,54 @@ export default defineContentScript({
           renderBubbleContent();
         });
 
-        const manifestRes = await safeSendMessage<{ groups?: Array<{ domain: string; unicodeDomain: string; displayName?: string; serviceKey?: string; associatedDomains?: string[]; accounts: any[] }> }>({
-          action: 'GET_ALL_MANIFEST'
-        }, 800);
-
-        const groups = manifestRes?.groups || [];
+        const loaded = await loadManifestGroupsReliable();
+        allManifestGroups = loaded.groups;
+        manifestContextLost = loaded.contextLost;
+        const groups = allManifestGroups;
         const itemsContainer = bubble.querySelector('#bubble-manifest-items');
         if (!itemsContainer) return;
 
         function renderGroupCards(filterText = '') {
           if (!itemsContainer) return;
           const query = filterText.trim().toLowerCase();
-          const filtered = groups.filter((g) => {
-            if (!query) return true;
-            return (
-              (g.displayName && g.displayName.toLowerCase().includes(query)) ||
-              g.domain.toLowerCase().includes(query) ||
-              g.unicodeDomain.toLowerCase().includes(query) ||
-              (g.serviceKey && g.serviceKey.toLowerCase().includes(query)) ||
-              (g.associatedDomains && g.associatedDomains.some((d) => d.toLowerCase().includes(query))) ||
-              g.accounts.some((a) => a.username.toLowerCase().includes(query) || (a.displayName && a.displayName.toLowerCase().includes(query)))
-            );
-          });
+          const filtered = query
+            ? groups.filter((g) => (
+                (g.displayName && g.displayName.toLowerCase().includes(query)) ||
+                g.domain.toLowerCase().includes(query) ||
+                g.unicodeDomain.toLowerCase().includes(query) ||
+                (g.serviceKey && g.serviceKey.toLowerCase().includes(query)) ||
+                (g.associatedDomains && g.associatedDomains.some((d) => d.toLowerCase().includes(query))) ||
+                g.accounts.some((a) => a.username.toLowerCase().includes(query) || (a.displayName && a.displayName.toLowerCase().includes(query)))
+              ))
+            : groups;
 
           if (filtered.length === 0) {
-            itemsContainer.innerHTML = `
-              <div style="text-align: center; color: #94a3b8; font-size: 11px; padding: 10px;">
-                未搜索到匹配的站点记录
-              </div>
-            `;
+            if (manifestContextLost) {
+              itemsContainer.innerHTML = `
+                <div style="text-align: center; color: #ef4444; font-size: 11px; padding: 10px;">
+                  扩展已更新或连接已重置，请刷新当前网页后重试
+                </div>
+              `;
+            } else if (groups.length === 0) {
+              itemsContainer.innerHTML = `
+                <div style="text-align: center; color: #94a3b8; font-size: 11px; padding: 10px;">
+                  暂无已保存的站点记录（请先「← 返回」录入或通过扩展弹窗同步）
+                </div>
+              `;
+            } else {
+              itemsContainer.innerHTML = `
+                <div style="text-align: center; color: #94a3b8; font-size: 11px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px;">
+                  <span>未搜索到匹配的站点记录</span>
+                  <button type="button" class="mantra-bubble-header-btn" id="bubble-btn-clear-manifest-search">显示全部 (${groups.length})</button>
+                </div>
+              `;
+              itemsContainer.querySelector('#bubble-btn-clear-manifest-search')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const sInput = bubble.querySelector<HTMLInputElement>('#bubble-manifest-search');
+                if (sInput) sInput.value = '';
+                renderGroupCards('');
+              });
+            }
             return;
           }
 
@@ -576,7 +790,7 @@ export default defineContentScript({
                 </div>
                 ${assocList.length > 0 ? `<div class="bubble-assoc-list">${assocPills}</div>` : ''}
                 <div class="bubble-assoc-inline" style="display: none;">
-                  <input type="text" class="bubble-assoc-input" placeholder="输入镜像域名或 *.example.com" />
+                  <input type="text" class="bubble-assoc-input" data-mantra-internal="true" autocomplete="off" placeholder="输入镜像域名或 *.example.com" />
                   <button type="button" class="btn-bubble-assoc-confirm" data-domain="${escBubbleHtml(g.domain)}">确定</button>
                   <button type="button" class="btn-bubble-assoc-cancel">取消</button>
                 </div>
@@ -584,12 +798,12 @@ export default defineContentScript({
             `;
 
             return `
-              <div class="bubble-manifest-group-card">
+              <div class="bubble-manifest-group-card" data-group-domain="${escBubbleHtml(g.domain)}">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                   <div style="display: flex; flex-direction: column; gap: 1px; overflow: hidden; min-width: 0;">
                     <div style="display: flex; align-items: center; gap: 4px; overflow: hidden;">
                       <span style="font-size: 13px; flex-shrink: 0;">${hasCustom ? '🏷️' : '🌐'}</span>
-                      <span class="bubble-domain-title-text" style="font-weight: 700; font-size: 11.5px; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;" title="双击或点击 ✏️ 修改备注名称" data-domain="${escBubbleHtml(g.domain)}" data-name="${escBubbleHtml(g.displayName || '')}">
+                      <span class="bubble-domain-title-text" style="font-weight: 700; font-size: 11.5px; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;" title="点击 ✏️ 修改备注名称" data-domain="${escBubbleHtml(g.domain)}" data-name="${escBubbleHtml(g.displayName || '')}">
                         ${escBubbleHtml(title)}
                       </span>
                       <button type="button" class="btn-edit-alias-inline" data-domain="${escBubbleHtml(g.domain)}" data-name="${escBubbleHtml(g.displayName || '')}" title="点击修改备注名称" style="border: none; background: transparent; cursor: pointer; font-size: 11px; opacity: 0.6; padding: 0 3px;">✏️</button>
@@ -599,58 +813,106 @@ export default defineContentScript({
                   </div>
                   <div style="display: flex; gap: 4px; flex-shrink: 0;">
                     ${!isCurrent ? `
-                      <button type="button" class="mantra-bubble-header-btn btn-link-this-group" data-domain="${escBubbleHtml(g.domain)}" data-name="${escBubbleHtml(title)}" style="padding: 2px 6px; color: #0d9488; border-color: #0d9488;" title="将当前网页关联为此站点的镜像">
+                      <button type="button" class="mantra-bubble-header-btn btn-link-this-group" data-domain="${escBubbleHtml(g.domain)}" data-name="${escBubbleHtml(title)}" style="padding: 2px 6px; color: #0d9488; border-color: #0d9488; white-space: nowrap;" title="将当前网页关联为此站点的镜像">
                         🔗 关联当前页
                       </button>
                     ` : '<span style="font-size: 9px; color: #0d9488; font-weight: 600;">✓ 当前站点</span>'}
                   </div>
                 </div>
+                <div class="bubble-alias-inline" style="display: none; gap: 4px; align-items: center;">
+                  <input type="text" class="bubble-assoc-input bubble-alias-input" data-mantra-internal="true" autocomplete="off" value="${escBubbleHtml(hasCustom ? g.displayName! : '')}" placeholder="输入站点备注别名..." />
+                  <button type="button" class="btn-bubble-assoc-confirm btn-bubble-alias-save">保存</button>
+                  <button type="button" class="btn-bubble-assoc-cancel btn-bubble-alias-cancel">取消</button>
+                </div>
                 ${assocHtml}
-                <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;">
+                <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
                   ${g.accounts.map((a) => `
-                    <span style="font-size: 10px; background: #e2e8f0; color: #334155; padding: 1px 5px; border-radius: 3px;">
-                      ${escBubbleHtml(a.username)} (v${a.version})
-                    </span>
+                    <button type="button" class="bubble-manifest-acc-btn" data-domain="${escBubbleHtml(g.domain)}" data-user="${escBubbleHtml(a.username)}" title="点击直接使用 [${escBubbleHtml(a.username)}] 填充当前网页">
+                      ⚡ ${escBubbleHtml(a.username)} (v${a.version})
+                    </button>
                   `).join('')}
                 </div>
               </div>
             `;
           }).join('');
 
-          // 绑定修改别名 (点击 ✏️ 图标或双击名称)
-          async function triggerEditAlias(targetDomain: string, currentName: string) {
-            const newAlias = window.prompt(`为站点 [${targetDomain}] 设置备注名称:`, currentName);
-            if (newAlias !== null) {
-              const trimmed = newAlias.trim();
-              await safeSendMessage({
-                action: 'SET_DOMAIN_DISPLAY_NAME',
-                payload: { domain: targetDomain, displayName: trimmed }
-              }, 800);
-              showInPageToast(trimmed ? `已设置备注 [${trimmed}]` : '已清除备注名称');
-              const refreshedManifest = await safeSendMessage<{ groups?: any[] }>({ action: 'GET_ALL_MANIFEST' }, 800);
-              if (refreshedManifest?.groups) {
-                groups.splice(0, groups.length, ...refreshedManifest.groups);
-                const searchInput = bubble.querySelector<HTMLInputElement>('#bubble-manifest-search');
-                renderGroupCards(searchInput?.value || '');
-              }
-            }
-          }
+          const refreshManifestGroups = async () => {
+            const refreshed = await loadManifestGroupsReliable();
+            allManifestGroups = refreshed.groups;
+            manifestContextLost = refreshed.contextLost;
+            const searchInput = bubble.querySelector<HTMLInputElement>('#bubble-manifest-search');
+            renderGroupCards(searchInput?.value || '');
+          };
 
-          itemsContainer.querySelectorAll('.btn-edit-alias-inline').forEach((btn) => {
-            btn.addEventListener('click', (e) => {
+          // 点击账号直接选用或一键填充（无需先去右上角关联）
+          itemsContainer.querySelectorAll('.bubble-manifest-acc-btn').forEach((accBtn) => {
+            accBtn.addEventListener('click', async (e) => {
               e.stopPropagation();
-              const targetDomain = (btn as HTMLElement).dataset.domain || '';
-              const currentName = (btn as HTMLElement).dataset.name || '';
-              triggerEditAlias(targetDomain, currentName);
+              const gDomain = (accBtn as HTMLElement).dataset.domain || '';
+              const gUser = (accBtn as HTMLElement).dataset.user || '';
+              const grp = groups.find((g) => g.domain === gDomain);
+              const acc = grp?.accounts.find((a) => a.username === gUser);
+              if (grp && acc) {
+                await adoptManifestAccount(grp, acc);
+              }
             });
           });
 
-          itemsContainer.querySelectorAll('.bubble-domain-title-text').forEach((titleEl) => {
-            titleEl.addEventListener('dblclick', (e) => {
+          // 内联修改站点备注名称
+          itemsContainer.querySelectorAll('.bubble-manifest-group-card').forEach((cardEl) => {
+            const targetDomain = (cardEl as HTMLElement).dataset.groupDomain || '';
+            const aliasRow = cardEl.querySelector('.bubble-alias-inline') as HTMLElement | null;
+            const aliasInput = cardEl.querySelector('.bubble-alias-input') as HTMLInputElement | null;
+            const btnSaveAlias = cardEl.querySelector('.btn-bubble-alias-save') as HTMLButtonElement | null;
+            const btnCancelAlias = cardEl.querySelector('.btn-bubble-alias-cancel') as HTMLButtonElement | null;
+
+            const openAliasEditor = () => {
+              if (!aliasRow) return;
+              const isHidden = aliasRow.style.display === 'none' || !aliasRow.style.display;
+              aliasRow.style.display = isHidden ? 'flex' : 'none';
+              if (isHidden) {
+                aliasInput?.focus();
+                aliasInput?.select();
+              }
+            };
+
+            const commitAlias = async () => {
+              const trimmed = aliasInput?.value.trim() || '';
+              const res = await safeSendMessage({
+                action: 'SET_DOMAIN_DISPLAY_NAME',
+                payload: { domain: targetDomain, displayName: trimmed }
+              }, 800);
+              if (!res) {
+                await setDomainDisplayName(targetDomain, trimmed);
+              }
+              showInPageToast(trimmed ? `已设置备注 [${trimmed}]` : '已清除备注名称');
+              await refreshManifestGroups();
+            };
+
+            cardEl.querySelector('.btn-edit-alias-inline')?.addEventListener('click', (e) => {
               e.stopPropagation();
-              const targetDomain = (titleEl as HTMLElement).dataset.domain || '';
-              const currentName = (titleEl as HTMLElement).dataset.name || '';
-              triggerEditAlias(targetDomain, currentName);
+              openAliasEditor();
+            });
+            cardEl.querySelector('.bubble-domain-title-text')?.addEventListener('dblclick', (e) => {
+              e.stopPropagation();
+              openAliasEditor();
+            });
+            btnCancelAlias?.addEventListener('click', (e) => {
+              e.stopPropagation();
+              if (aliasRow) aliasRow.style.display = 'none';
+            });
+            btnSaveAlias?.addEventListener('click', (e) => {
+              e.stopPropagation();
+              commitAlias();
+            });
+            aliasInput?.addEventListener('keydown', (e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commitAlias();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                if (aliasRow) aliasRow.style.display = 'none';
+              }
             });
           });
 
@@ -665,19 +927,22 @@ export default defineContentScript({
               (btn as HTMLButtonElement).disabled = true;
               (btn as HTMLButtonElement).textContent = '⏳ 关联中...';
 
-              const res = await safeSendMessage<{ status?: string; ok?: boolean }>({
+              let res = await safeSendMessage<{ status?: string; ok?: boolean }>({
                 action: 'LINK_DOMAIN',
                 payload: { targetDomain: currentDomain, sourceDomain }
-              }, 800);
+              }, 1000);
+              if (!res) {
+                const ok = await linkDomainToExisting(currentDomain, sourceDomain);
+                res = { status: ok ? 'ok' : 'error', ok };
+              }
 
               if (res?.ok || res?.status === 'ok') {
                 showInPageToast(`🎉 成功将当前网页关联至 [${sourceName}]！`);
-                // 重新读取本站账号
                 const refreshed = await safeSendMessage<{ accounts?: any[] }>({
                   action: 'GET_ACCOUNTS_FOR_DOMAIN',
                   payload: { domain: currentDomain, title: document.title }
-                }, 600);
-                accounts = refreshed?.accounts || [];
+                }, 800);
+                accounts = refreshed?.accounts || await getAccountsForDomain(currentDomain, document.title);
                 selectedAccountIndex = 0;
                 isNewAccountMode = false;
                 currentView = 'main';
@@ -699,21 +964,15 @@ export default defineContentScript({
             const btnConfirm = drawer.querySelector('.btn-bubble-assoc-confirm') as HTMLButtonElement | null;
             const btnCancel = drawer.querySelector('.btn-bubble-assoc-cancel') as HTMLButtonElement | null;
 
-            const refreshManifestGroups = async () => {
-              const refreshed = await safeSendMessage<{ groups?: any[] }>({ action: 'GET_ALL_MANIFEST' }, 800);
-              if (refreshed?.groups) {
-                groups.splice(0, groups.length, ...refreshed.groups);
-                const searchInput = bubble.querySelector<HTMLInputElement>('#bubble-manifest-search');
-                renderGroupCards(searchInput?.value || '');
-              }
-            };
-
             const submitAdd = async () => {
               const alias = inputEl?.value.trim() || '';
-              const res = await safeSendMessage<{ ok?: boolean; message?: string }>({
+              let res = await safeSendMessage<{ ok?: boolean; message?: string }>({
                 action: 'ADD_DOMAIN_ALIAS',
                 payload: { domain, alias }
               }, 800);
+              if (!res) {
+                res = await addDomainAlias(domain, alias);
+              }
               if (res?.ok) {
                 showInPageToast(`✓ ${res.message || '已添加关联域名'}`);
                 await refreshManifestGroups();
@@ -757,10 +1016,13 @@ export default defineContentScript({
                 e.stopPropagation();
                 const alias = (rmBtn as HTMLElement).dataset.alias || '';
                 if (!alias) return;
-                const res = await safeSendMessage<{ ok?: boolean }>({
+                let res = await safeSendMessage<{ ok?: boolean }>({
                   action: 'REMOVE_DOMAIN_ALIAS',
                   payload: { domain, alias }
                 }, 800);
+                if (!res) {
+                  res = { ok: await removeDomainAlias(domain, alias) };
+                }
                 if (res?.ok) {
                   showInPageToast(`已取消关联 [${alias}]`);
                   await refreshManifestGroups();
@@ -781,6 +1043,25 @@ export default defineContentScript({
       }
 
       function bindMainEvents() {
+        bubble.querySelector('#bubble-btn-open-all-manifest')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          currentView = 'manifest';
+          renderBubbleContent();
+        });
+
+        bubble.querySelectorAll('.btn-quick-adopt-site').forEach((btn) => {
+          btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const gDomain = (btn as HTMLElement).dataset.domain || '';
+            const gUser = (btn as HTMLElement).dataset.user || '';
+            const grp = allManifestGroups.find((g) => g.domain === gDomain);
+            const acc = grp?.accounts.find((a) => a.username === gUser);
+            if (grp && acc) {
+              await adoptManifestAccount(grp, acc);
+            }
+          });
+        });
+
         // 卡片点选切换选定账号
         bubble.querySelectorAll('.mantra-card').forEach((card) => {
           card.addEventListener('click', (e) => {
@@ -872,35 +1153,27 @@ export default defineContentScript({
           const targetAcc = accounts[selectedAccountIndex] || accounts[0];
           if (!targetAcc) return;
 
-          let mantraToUse = '';
-          if (oldMantraInput && oldMantraInput.value.trim()) {
-            mantraToUse = oldMantraInput.value.trim();
-            // 顺带解锁后台 15 分钟会话
-            await safeSendMessage({ action: 'UNLOCK_SESSION', payload: { mantra: mantraToUse } }, 600);
-            isUnlocked = true;
-          }
+          const mantraToUse = oldMantraInput ? oldMantraInput.value.trim() : '';
+          if (mantraToUse) isUnlocked = true;
 
-          chrome.runtime.sendMessage({
-            action: 'DERIVE_CREDENTIAL',
-            payload: {
-              domain: currentDomain,
-              serviceKey: targetAcc.serviceKey,
-              username: targetAcc.username,
-              version: targetAcc.version,
-              rule_preset: targetAcc.rulePreset,
-            },
-          }, (res) => {
-            const _err = chrome.runtime.lastError;
-            const pwd = res?.data?.derived_password;
-            if (pwd) {
-              injectInputValue(anchorInput, pwd);
-              showInPageToast(`⚡ 已成功填入 [${targetAcc.username}] 强密码`);
-              closeBubble();
-            } else {
-              showInPageToast('❌ 派生失败: ' + (res?.message || '请先输入记忆口令'));
-              if (oldMantraInput) oldMantraInput.focus();
-            }
+          const derived = await deriveCredentialReliable({
+            domain: currentDomain,
+            serviceKey: targetAcc.serviceKey,
+            username: targetAcc.username,
+            version: targetAcc.version,
+            rulePreset: targetAcc.rulePreset,
+            mantra: mantraToUse || undefined,
           });
+
+          if (derived.password) {
+            injectInputValue(anchorInput, derived.password);
+            autofillPageCredentials(targetAcc.username, derived.password);
+            showInPageToast(`⚡ 已成功填入 [${targetAcc.username}] 强密码`);
+            closeBubble();
+          } else {
+            showInPageToast('❌ 派生失败: ' + (derived.message || '请先输入记忆口令'));
+            if (oldMantraInput) oldMantraInput.focus();
+          }
         });
 
         // 录入新账号保存并填充
@@ -941,48 +1214,40 @@ export default defineContentScript({
           }
 
           const mantraVal = newMantraInput?.value.trim() || '';
-          if (mantraVal) {
-            await safeSendMessage({ action: 'UNLOCK_SESSION', payload: { mantra: mantraVal } }, 600);
-            isUnlocked = true;
-          }
+          if (mantraVal) isUnlocked = true;
 
           const rulePreset = newRuleSelect?.value || 'standard-16';
-
-          chrome.runtime.sendMessage({
-            action: 'DERIVE_CREDENTIAL',
-            payload: {
-              domain: currentDomain,
-              username,
-              version: newVer,
-              rule_preset: rulePreset,
-            },
-          }, async (deriveRes) => {
-            const _err = chrome.runtime.lastError;
-            const pwd = deriveRes?.data?.derived_password;
-            if (pwd) {
-              injectInputValue(anchorInput, pwd);
-              showInPageToast(`⚡ 已成功填入 [${username}] 密码`);
-
-              if (shouldSave) {
-                await safeSendMessage({
-                  action: 'SAVE_ACCOUNT',
-                  payload: {
-                    domain: currentDomain,
-                    account: {
-                      username,
-                      version: newVer,
-                      rulePreset,
-                      tag: 'Personal',
-                    },
-                  },
-                }, 600);
-              }
-              closeBubble();
-            } else {
-              showInPageToast('❌ 派生失败: ' + (deriveRes?.message || '请先输入记忆口令'));
-              if (newMantraInput) newMantraInput.focus();
-            }
+          const derived = await deriveCredentialReliable({
+            domain: currentDomain,
+            username,
+            version: newVer,
+            rulePreset,
+            mantra: mantraVal || undefined,
           });
+
+          if (derived.password) {
+            injectInputValue(anchorInput, derived.password);
+            showInPageToast(`⚡ 已成功填入 [${username}] 密码`);
+
+            if (shouldSave) {
+              await safeSendMessage({
+                action: 'SAVE_ACCOUNT',
+                payload: {
+                  domain: currentDomain,
+                  account: {
+                    username,
+                    version: newVer,
+                    rulePreset,
+                    tag: 'Personal',
+                  },
+                },
+              }, 800);
+            }
+            closeBubble();
+          } else {
+            showInPageToast('❌ 派生失败: ' + (derived.message || '请先输入记忆口令'));
+            if (newMantraInput) newMantraInput.focus();
+          }
         };
 
         bubble.querySelector('#bubble-btn-save-and-fill')?.addEventListener('click', (e) => {
